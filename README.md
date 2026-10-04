@@ -82,4 +82,4 @@ Early open-source extraction candidate. The core functions are derived from work
 
 ## License
 
-**Owner decision pending before public release.** The package remains marked `UNLICENSED` and private until an explicit open-source license is selected.
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

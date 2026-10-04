@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "description": "Database-agnostic Arabic/RTL document template engine extracted from Masar Wathaeq.",
   "type": "module",
-  "private": true,
-  "license": "UNLICENSED",
+  "private": false,
+  "license": "Apache-2.0",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -13,8 +13,9 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "README.md"],
+  "files": ["dist", "README.md", "LICENSE", "NOTICE"],
   "scripts": {
+    "prebuild": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "tsc -p tsconfig.json",
     "test": "tsx --test test/*.test.ts",
     "check": "npm run build && npm test"
