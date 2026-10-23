@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#f7f8fc">
+    <meta name="description" content="مساعد ذكي للمحادثة وإنشاء المستندات العربية.">
+    <title>مسار | مساحة العمل الذكية</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <section class="auth-screen" id="auth-screen">
+      <form class="auth-card" id="auth-form">
+        <a class="brand auth-brand" href="/" aria-label="مسار"><span class="brand-mark">م</span><span><strong>مسار</strong><small>مساحة العمل الذكية</small></span></a>
+        <p class="welcome-kicker">مساحة آمنة لأفكارك</p>
+        <h1 id="auth-title">مرحبًا بعودتك</h1>
+        <p class="auth-description" id="auth-description">سجّل الدخول للمتابعة إلى مساحة عملك.</p>
+        <label class="auth-name hidden" id="auth-name-label" for="auth-name">الاسم</label>
+        <input class="auth-name hidden" id="auth-name" name="name" maxlength="80" autocomplete="name" placeholder="اسمك">
+        <label for="auth-email">البريد الإلكتروني</label>
+        <input id="auth-email" name="email" type="email" maxlength="254" autocomplete="email" required>
+        <label for="auth-password">كلمة المرور</label>
+        <input id="auth-password" name="password" type="password" minlength="10" maxlength="128" autocomplete="current-password" required>
+        <button class="primary-button auth-submit" type="submit" id="auth-submit">تسجيل الدخول</button>
+        <button class="auth-toggle" id="auth-toggle" type="button">إنشاء حساب جديد</button>
+      </form>
+    </section>
+    <div class="app-shell hidden" id="app-shell">
+      <aside class="sidebar" aria-label="القائمة الرئيسية">
+        <a class="brand" href="/" aria-label="مسار - الصفحة الرئيسية">
+          <span class="brand-mark">م</span>
+          <span><strong>مسار</strong><small>مساحة العمل الذكية</small></span>
+        </a>
+        <button class="new-chat-button" id="new-chat" type="button"><span aria-hidden="true">＋</span> محادثة جديدة</button>
+        <nav class="primary-nav">
+          <button class="nav-link active" data-view="chat" type="button"><span aria-hidden="true">✳</span> المساعد الذكي</button>
+          <button class="nav-link" data-view="documents" type="button"><span aria-hidden="true">▤</span> المستندات</button>
+          <button class="nav-link" data-view="agents" type="button"><span aria-hidden="true">⌘</span> الوكلاء</button>
+          <button class="nav-link" data-view="integrations" type="button"><span aria-hidden="true">⤳</span> التكاملات</button>
+        </nav>
+        <div class="sidebar-label">محادثاتك الأخيرة</div>
+        <div class="conversation-list" id="conversation-list"></div>
+        <div class="sidebar-bottom">
+          <div class="connection-indicator" id="connection-indicator">
+            <span class="status-dot"></span>
+            <span id="connection-label">جارٍ التحقق من الاتصال...</span>
+          </div>
+          <span class="profile-avatar" aria-hidden="true">م</span>
+          <div class="profile-copy"><strong id="profile-name">مساحة العمل</strong><small id="profile-email">حسابك</small></div>
+          <button class="logout-button" id="logout-button" type="button" title="تسجيل الخروج" aria-label="تسجيل الخروج">↪</button>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <span class="eyebrow" id="topbar-eyebrow">مساحة عملك</span>
+            <h1 id="topbar-title">المساعد الذكي</h1>
+          </div>
+          <div class="topbar-actions">
+            <span class="model-pill"><span class="model-sparkle">✦</span><span id="model-name">مساعد مسار</span></span>
+          </div>
+        </header>
+
+        <section class="view-panel chat-view" id="chat-view">
+          <div class="chat-scroll" id="chat-scroll">
+            <div class="welcome" id="welcome">
+              <div class="welcome-orb"><span>✦</span></div>
+              <p class="welcome-kicker">مساحة تفكيرك الجديدة</p>
+              <h2>أهلًا بك، كيف أقدر أساعدك؟</h2>
+              <p class="welcome-description">اسأل، اكتب، أو ابدأ من إحدى الأفكار التالية.</p>
+              <div class="suggestions">
+                <button class="suggestion-card" type="button" data-prompt="اكتب لي خطابًا رسميًا لطلب إجازة لمدة أسبوع">
+                  <span class="suggestion-icon violet">✎</span><span><strong>اكتب مستندًا</strong><small>ابدأ بصياغة خطاب أو رسالة رسمية</small></span><span class="suggestion-arrow">←</span>
+                </button>
+                <button class="suggestion-card" type="button" data-prompt="ساعدني في تنظيم أفكاري ووضع خطة عمل واضحة">
+                  <span class="suggestion-icon blue">⌁</span><span><strong>فكّر معي</strong><small>حوّل أفكارك إلى خطوات عملية</small></span><span class="suggestion-arrow">←</span>
+                </button>
+                <button class="suggestion-card" type="button" data-prompt="اشرح لي مفهوم الذكاء الاصطناعي التوليدي ببساطة">
+                  <span class="suggestion-icon amber">◇</span><span><strong>تعلّم شيئًا</strong><small>احصل على شرح بسيط وواضح</small></span><span class="suggestion-arrow">←</span>
+                </button>
+              </div>
+            </div>
+            <div class="messages" id="messages" aria-live="polite"></div>
+          </div>
+          <form class="composer" id="chat-form">
+            <label class="sr-only" for="chat-input">اكتب رسالتك</label>
+            <textarea id="chat-input" rows="1" placeholder="اكتب رسالتك هنا..." required></textarea>
+            <div class="composer-footer">
+                <div class="composer-tools">
+                  <button class="tool-button" id="attach-image" type="button" title="إرفاق صورة" aria-label="إرفاق صورة">▧</button>
+                  <input class="hidden" id="image-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif">
+                  <button class="tool-button" id="record-audio" type="button" title="تسجيل رسالة صوتية" aria-label="تسجيل رسالة صوتية">◉</button>
+                  <button class="tool-button" id="search-web" type="button" title="بحث الويب" aria-label="بحث الويب">⌕</button>
+                </div>
+                <div class="composer-submit">
+                  <span class="composer-hint"><span aria-hidden="true">↵</span> للإرسال · Shift + Enter لسطر جديد</span>
+                  <button class="send-button" id="send-button" type="submit" aria-label="إرسال الرسالة"><span>إرسال</span><span aria-hidden="true">↑</span></button>
+                </div>
+                <span class="attachment-preview hidden" id="attachment-preview"></span>
+              </div>
+          </form>
+          <p class="disclaimer">قد يخطئ المساعد أحيانًا. راجع المعلومات المهمة قبل استخدامها.</p>
+        </section>
+
+        <section class="view-panel documents-view hidden" id="documents-view">
+          <div class="documents-layout">
+            <div class="document-form-panel">
+              <div class="section-heading">
+                <span class="section-icon">▤</span>
+                <div><h2>أنشئ مستندًا بمساعدة AI</h2><p>صف ما تحتاجه وسنجهز لك مسودة قابلة للتعديل.</p></div>
+              </div>
+              <form id="document-form">
+                <label for="document-title">عنوان المستند</label>
+                <input id="document-title" type="text" maxlength="200" placeholder="مثال: خطاب عرض وظيفي" required>
+                <label for="document-prompt">ما الذي تريد أن يتضمنه؟</label>
+                <textarea id="document-prompt" rows="7" maxlength="8000" placeholder="اكتب نوع المستند، الجهة الموجه إليها، وأي تفاصيل مهمة..." required></textarea>
+                <button class="primary-button" id="generate-document" type="submit"><span aria-hidden="true">✦</span> إنشاء مسودة</button>
+              </form>
+              <div class="privacy-note"><span aria-hidden="true">◈</span><p>راجع المسودة قبل اعتمادها، ولا ترسل بيانات حساسة أو سرية.</p></div>
+              <div class="saved-documents">
+                <span class="sidebar-label">مستنداتك المحفوظة</span>
+                <div id="saved-documents"></div>
+              </div>
+            </div>
+            <div class="document-preview-panel">
+              <div class="preview-header">
+                <div><span class="eyebrow">معاينة المستند</span><h2 id="preview-title">مسودتك ستظهر هنا</h2></div>
+                <div class="export-actions hidden" id="export-actions">
+                  <button class="secondary-button" type="button" id="save-document">حفظ التعديلات</button>
+                  <button class="secondary-button" type="button" data-export="html">تنزيل HTML</button>
+                  <button class="primary-button compact" type="button" data-export="docx">تنزيل Word</button>
+                </div>
+              </div>
+              <div class="paper" id="paper">
+                <div class="paper-empty"><span>▤</span><p>ابدأ بإنشاء مستند لتظهر معاينته هنا.</p></div>
+                <textarea class="document-content hidden" id="document-content" aria-label="محتوى المستند، قابل للتعديل"></textarea>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="view-panel agents-view hidden" id="agents-view">
+          <div class="feature-layout">
+            <section class="feature-panel">
+              <div class="section-heading"><span class="section-icon">⌘</span><div><h2>أنشئ وكيلك</h2><p>حدد التعليمات والأدوات التي يحتاجها.</p></div></div>
+              <form id="agent-form">
+                <label for="agent-name">اسم الوكيل</label><input id="agent-name" maxlength="80" required placeholder="مثال: مساعد البحث">
+                <label for="agent-instructions">تعليمات الوكيل</label><textarea id="agent-instructions" rows="5" maxlength="8000" required placeholder="ما دوره؟ كيف ينبغي أن يجيب؟"></textarea>
+                <fieldset class="tool-options"><legend>الأدوات المتاحة</legend>
+                  <label><input type="checkbox" name="agent-tool" value="web_search"> بحث الويب (Tavily)</label>
+                  <label><input type="checkbox" name="agent-tool" value="draft_document"> إعداد مسودات المستندات</label>
+                  <label><input type="checkbox" name="agent-tool" value="draft_email"> صياغة مسودات البريد (لا ترسل)</label>
+                </fieldset>
+                <button class="primary-button" id="save-agent" type="submit">حفظ الوكيل</button>
+              </form>
+              <div class="agent-list" id="agent-list"></div>
+            </section>
+            <section class="feature-panel agent-run-panel">
+              <div class="section-heading"><span class="section-icon">✦</span><div><h2>شغّل وكيلًا</h2><p>الأدوات الخارجية تعمل بناءً على اختيارك.</p></div></div>
+              <form id="agent-run-form">
+                <label for="agent-select">الوكيل</label><select id="agent-select" required><option value="">اختر وكيلًا</option></select>
+                <label for="agent-prompt">المهمة</label><textarea id="agent-prompt" rows="6" maxlength="8000" required placeholder="اشرح ما تريد من الوكيل إنجازه..."></textarea>
+                <button class="primary-button" id="run-agent" type="submit">تشغيل الوكيل</button>
+              </form>
+              <div class="agent-output hidden" id="agent-output" aria-live="polite"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="view-panel integrations-view hidden" id="integrations-view">
+          <div class="integrations-layout">
+            <section class="feature-panel">
+              <div class="section-heading"><span class="section-icon">⌕</span><div><h2>بحث الويب</h2><p>ابحث عبر Tavily واعرض المصادر والروابط.</p></div></div>
+              <form id="search-form">
+                <label for="search-query">عبارة البحث</label><input id="search-query" maxlength="500" required placeholder="ما الذي تريد البحث عنه؟">
+                <button class="primary-button" type="submit" id="search-submit">بحث</button>
+              </form>
+              <div class="integration-results hidden" id="search-results" aria-live="polite"></div>
+            </section>
+            <section class="feature-panel">
+              <div class="section-heading"><span class="section-icon">✉</span><div><h2>إرسال بريد إلكتروني</h2><p>يرسل عبر SMTP بعد تأكيدك الصريح فقط.</p></div></div>
+              <form id="email-form">
+                <label for="email-to">إلى</label><input id="email-to" type="email" maxlength="254" required placeholder="name@example.com">
+                <label for="email-subject">الموضوع</label><input id="email-subject" maxlength="200" required>
+                <label for="email-text">نص الرسالة</label><textarea id="email-text" rows="5" maxlength="20000" required></textarea>
+                <button class="primary-button" type="submit" id="email-send">مراجعة وإرسال</button>
+              </form>
+              <p class="privacy-note">لا تُرسل الرسالة إلا بعد تأكيد نافذة المراجعة.</p>
+            </section>
+            <div class="integration-status-card"><strong>حالة الإعداد</strong><span id="integration-status">جارٍ التحقق...</span><small>تُضبط مفاتيح Tavily وSMTP على الخادم في ملف .env.</small></div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

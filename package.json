@@ -13,22 +13,32 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "README.md", "LICENSE", "NOTICE"],
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "NOTICE"
+  ],
   "scripts": {
     "prebuild": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "tsc -p tsconfig.json",
     "test": "tsx --test test/*.test.ts",
-    "check": "npm run build && npm test"
+    "check": "npm run build && npm test",
+    "dev": "npm run build && node --env-file-if-exists=.env app/server.mjs",
+    "start": "npm run build && node --env-file-if-exists=.env app/server.mjs"
   },
   "dependencies": {
-    "docx": "^9.7.1"
+    "better-sqlite3": "^13.0.3",
+    "docx": "^9.7.1",
+    "nodemailer": "^10.2.1"
   },
   "devDependencies": {
     "@types/node": "^20.19.0",
+    "@types/nodemailer": "^8.0.2",
     "tsx": "^4.20.0",
     "typescript": "^5.9.0"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.18"
   }
 }
