@@ -70,6 +70,7 @@ The repository also includes an Arabic-first web app in `app/` that uses the doc
 - editable AI document drafts with DOCX and HTML export;
 - user-configurable agents with optional web search, document drafting, and email drafting tools;
 - Tavily web search and SMTP email sending (with a separate confirmation before sending);
+- manual monthly subscriptions through Vodafone Cash, with admin-reviewed transfer references and AI access enabled after approval;
 
 To run it locally, use Node.js 22 or later, copy `.env.example` to `.env`, set `AI_API_KEY` and `AI_API_BASE_URL` / `AI_MODEL` as needed, then run:
 
@@ -77,7 +78,7 @@ To run it locally, use Node.js 22 or later, copy `.env.example` to `.env`, set `
 npm run dev
 ```
 
-Open `http://127.0.0.1:4173` and create an account. Set `TAVILY_API_KEY` to enable web search, and `SMTP_URL` plus `SMTP_FROM` to enable email. AI model names for vision, transcription, and speech can be overridden with the corresponding `AI_*_MODEL` variables. The SQLite database defaults to `data/masar.sqlite` and can be moved using `MASAR_DATABASE_PATH`.
+Open `http://127.0.0.1:4173` and create an account. Set `TAVILY_API_KEY` to enable web search, and `SMTP_URL` plus `SMTP_FROM` to enable email. AI model names for vision, transcription, and speech can be overridden with the corresponding `AI_*_MODEL` variables. The SQLite database defaults to `data/masar.sqlite` and can be moved using `MASAR_DATABASE_PATH`. The default Vodafone Cash number is `+201015707603` and the monthly price is 200 EGP; configure `VODAFONE_CASH_NUMBER`, `MONTHLY_PRICE_EGP`, `BILLING_ADMIN_EMAIL`, and a strong, private `BILLING_ADMIN_KEY` for a deployment. Generate a key with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"` and set it only in the server's ignored `.env`. The account matching `BILLING_ADMIN_EMAIL` must also provide the key in the billing screen before reviewing requests. Users submit a transfer reference after paying; an administrator must manually verify the transfer and approve or reject each request. AI and business-integration operations require an active approved subscription; accounts and billing remain accessible before payment.
 
 Provider configuration examples:
 
@@ -88,6 +89,10 @@ AI_MODEL=gpt-4o-mini
 TAVILY_API_KEY=your-tavily-key
 SMTP_URL=smtps://user:password@smtp.example.com:465
 SMTP_FROM="Masar <no-reply@example.com>"
+BILLING_ADMIN_EMAIL=admin@example.com
+BILLING_ADMIN_KEY=<random-private-secret>
+MONTHLY_PRICE_EGP=200
+VODAFONE_CASH_NUMBER=+201015707603
 ```
 
 If SMTP credentials contain reserved URL characters, percent-encode them in `SMTP_URL`.

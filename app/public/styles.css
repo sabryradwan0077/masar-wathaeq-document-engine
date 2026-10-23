@@ -179,13 +179,50 @@ button { cursor: pointer; }
 .search-result a { color: #5849c0; font-weight: 600; }
 .search-result p { margin: 6px 0 0; color: #77768a; }
 .privacy-note { font-size: 10px; }
+.billing-layout { display: grid; width: min(100%, 950px); flex: 1; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-self: center; }
+.subscription-panel { grid-column: 1; }
+.subscription-price { display: flex; align-items: baseline; gap: 8px; margin: 18px 0; color: #6152c5; }
+.subscription-price strong { font-size: 31px; }
+.subscription-price span { color: #77768a; font-size: 12px; }
+.payment-instructions { display: grid; gap: 9px; padding: 15px; border: 1px solid #ebe8fa; border-radius: 11px; background: #faf9ff; }
+.payment-instructions p, .payment-instructions small { margin: 0; color: #76748a; font-size: 11px; line-height: 1.7; }
+.payment-instructions strong { width: fit-content; padding: 7px 12px; border: 1px dashed #c9c2f0; border-radius: 8px; color: #4d3eb1; background: #fff; font-size: 18px; letter-spacing: .04em; }
+.subscription-status { margin: 15px 0; padding: 11px; border-radius: 9px; color: #725b27; background: #fff8e9; font-size: 11px; line-height: 1.7; }
+.subscription-status.active { color: #28744e; background: #edf9f2; }
+#payment-request-form { display: grid; gap: 9px; }
+#payment-request-form > label { margin-top: 5px; color: #555469; font-size: 11px; }
+#transfer-reference { min-height: 40px; padding: 9px 10px; border: 1px solid #e8e8f0; border-radius: 8px; outline: 0; font: inherit; font-size: 11px; }
+.payment-confirm { display: flex; align-items: center; gap: 8px; line-height: 1.7; }
+.payment-confirm input { accent-color: var(--accent); }
+.payment-history { display: grid; gap: 9px; margin-top: 20px; padding-top: 14px; border-top: 1px solid #efeff4; }
+.payment-history > strong { font-size: 11px; }
+#payment-history-list { display: grid; gap: 7px; }
+.payment-history-item { display: grid; gap: 5px; padding: 10px; border: 1px solid #efeff4; border-radius: 9px; color: #747386; font-size: 10px; overflow-wrap: anywhere; }
+.payment-status { width: fit-content; font-size: 10px; }
+.payment-status.pending { color: #9a7020; }
+.payment-status.approved { color: #28744e; }
+.payment-status.rejected { color: #b34353; }
+.billing-muted { margin: 0; color: #9796a7; font-size: 10px; }
+.admin-billing-panel { grid-column: 2; }
+#admin-payment-requests { display: grid; gap: 10px; }
+.admin-payment-request { display: grid; gap: 5px; padding: 12px; border: 1px solid #efeff4; border-radius: 10px; overflow-wrap: anywhere; }
+.admin-payment-request strong { font-size: 11px; }
+.admin-payment-request p { margin: 0; color: #747386; font-size: 10px; line-height: 1.7; }
+.admin-payment-request small { color: #9998a9; font-size: 9px; }
+.payment-review-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 5px; }
+.payment-review-actions button { min-height: 32px; padding: 6px 9px; font-size: 9px; }
+.billing-note { grid-column: 1 / -1; margin: 0; color: #9291a3; font-size: 10px; line-height: 1.7; }
+.admin-key-form { display: grid; gap: 8px; margin-bottom: 14px; }
+.admin-key-form label { color: #555469; font-size: 10px; }
+.admin-key-form input { min-height: 38px; padding: 8px 10px; border: 1px solid #e8e8f0; border-radius: 8px; outline: 0; font: inherit; font-size: 11px; }
+.admin-key-form input:focus { border-color: #c8c2f2; }
 @keyframes pulse { 50% { box-shadow: 0 0 0 4px #d34d6523; } }
 
 @media (max-width: 900px) {
   .sidebar { width: 220px; }
   .workspace { width: calc(100% - 220px); margin-right: 220px; }
   .documents-layout { grid-template-columns: minmax(230px, .78fr) minmax(0, 1.22fr); gap: 14px; }
-  .feature-layout, .integrations-layout { gap: 12px; }
+  .feature-layout, .integrations-layout, .billing-layout { gap: 12px; }
   .feature-panel { padding: 15px; }
   .suggestions { gap: 7px; }
   .suggestion-card { gap: 6px; padding: 9px 7px; }
@@ -217,7 +254,8 @@ button { cursor: pointer; }
   .disclaimer { margin-bottom: 10px; }
   .documents-view { padding: 15px 12px 76px; }
   .documents-layout { grid-template-columns: 1fr; }
-  .feature-layout, .integrations-layout { grid-template-columns: 1fr; }
+  .feature-layout, .integrations-layout, .billing-layout { grid-template-columns: 1fr; }
+  .subscription-panel, .admin-billing-panel, .billing-note { grid-column: auto; }
   .integration-status-card { grid-column: auto; }
   .document-form-panel { padding: 16px; }
   .document-preview-panel { min-height: 430px; padding: 15px; }

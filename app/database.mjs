@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { randomUUID } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 
@@ -61,6 +62,29 @@ db.exec(`
     updated_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS documents_user_idx ON documents(user_id, updated_at DESC);
+  CREATE TABLE IF NOT EXISTS payment_requests (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    amount_egp INTEGER NOT NULL CHECK(amount_egp > 0),
+    transfer_reference TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('pending', 'approved', 'rejected')),
+    reviewed_by TEXT REFERENCES users(id),
+    created_at TEXT NOT NULL,
+    reviewed_at TEXT
+  );
+  CREATE INDEX IF NOT EXISTS payment_requests_user_idx ON payment_requests(user_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS payment_requests_status_idx ON payment_requests(status, created_at);
+  CREATE UNIQUE INDEX IF NOT EXISTS payment_requests_one_pending_per_user
+    ON payment_requests(user_id) WHERE status = 'pending';
+  CREATE TABLE IF NOT EXISTS subscriptions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    payment_request_id TEXT NOT NULL UNIQUE REFERENCES payment_requests(id),
+    starts_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS subscriptions_user_expiry_idx ON subscriptions(user_id, expires_at DESC);
 `);
 
 const now = () => new Date().toISOString();
@@ -202,4 +226,70 @@ export function saveDocument(userId, { id, title, content }) {
 
 export function deleteDocument(userId, documentId) {
   return db.prepare('DELETE FROM documents WHERE id = ? AND user_id = ?').run(documentId, userId).changes > 0;
+}
+
+export function getActiveSubscription(userId) {
+  const now = new Date().toISOString();
+  return db.prepare(
+    'SELECT id, starts_at AS startsAt, expires_at AS expiresAt FROM subscriptions WHERE user_id = ? AND expires_at > ? ORDER BY expires_at DESC LIMIT 1',
+  ).get(userId, now) ?? null;
+}
+
+export function listPaymentRequests(userId) {
+  return db.prepare(
+    'SELECT id, amount_egp AS amountEgp, transfer_reference AS transferReference, status, created_at AS createdAt, reviewed_at AS reviewedAt FROM payment_requests WHERE user_id = ? ORDER BY created_at DESC LIMIT 20',
+  ).all(userId);
+}
+
+export function createPaymentRequest({ id, userId, amountEgp, transferReference }) {
+  const createdAt = now();
+  db.prepare(
+    'INSERT INTO payment_requests (id, user_id, amount_egp, transfer_reference, status, created_at) VALUES (?, ?, ?, ?, \'pending\', ?)',
+  ).run(id, userId, amountEgp, transferReference, createdAt);
+  return db.prepare(
+    'SELECT id, amount_egp AS amountEgp, transfer_reference AS transferReference, status, created_at AS createdAt FROM payment_requests WHERE id = ?',
+  ).get(id);
+}
+
+export function listPendingPaymentRequests() {
+  return db.prepare(
+    'SELECT payment_requests.id, payment_requests.amount_egp AS amountEgp, payment_requests.transfer_reference AS transferReference, payment_requests.created_at AS createdAt, users.email, users.display_name AS displayName FROM payment_requests JOIN users ON users.id = payment_requests.user_id WHERE payment_requests.status = \'pending\' ORDER BY payment_requests.created_at',
+  ).all();
+}
+
+export function reviewPaymentRequest({ id, adminUserId, approve }) {
+  const timestamp = now();
+  const transaction = db.transaction(() => {
+    const payment = db.prepare(
+      'SELECT id, user_id AS userId, status FROM payment_requests WHERE id = ?',
+    ).get(id);
+    if (!payment) return 'not_found';
+    if (payment.status !== 'pending') return 'already_reviewed';
+
+    const updated = db.prepare(
+      'UPDATE payment_requests SET status = ?, reviewed_by = ?, reviewed_at = ? WHERE id = ? AND status = \'pending\'',
+    ).run(approve ? 'approved' : 'rejected', adminUserId, timestamp, id);
+    if (updated.changes !== 1) return 'already_reviewed';
+
+    if (approve) {
+      const active = db.prepare(
+        'SELECT expires_at AS expiresAt FROM subscriptions WHERE user_id = ? AND expires_at > ? ORDER BY expires_at DESC LIMIT 1',
+      ).get(payment.userId, timestamp);
+      const startsAt = active ? active.expiresAt : timestamp;
+      const startDate = new Date(startsAt);
+      const desiredMonth = startDate.getUTCMonth() + 1;
+      const year = startDate.getUTCFullYear() + Math.floor(desiredMonth / 12);
+      const month = desiredMonth % 12;
+      const day = startDate.getUTCDate();
+      const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+      startDate.setUTCDate(1);
+      startDate.setUTCFullYear(year, month, Math.min(day, lastDay));
+      const expiresAt = startDate.toISOString();
+      db.prepare(
+        'INSERT INTO subscriptions (id, user_id, payment_request_id, starts_at, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      ).run(randomUUID(), payment.userId, id, startsAt, expiresAt, timestamp);
+    }
+    return 'reviewed';
+  });
+  return transaction();
 }

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -25,14 +25,19 @@ import {
   getDocument,
   getAgent,
   getConversation,
+  getActiveSubscription,
   getSessionUser,
   getUserByEmail,
   listAgents,
   listConversations,
   listDocuments,
+  listPaymentRequests,
+  listPendingPaymentRequests,
+  createPaymentRequest,
   saveAgent,
   saveConversation,
   saveDocument,
+  reviewPaymentRequest,
 } from './database.mjs';
 import { IntegrationError, integrationStatus, sendEmail, webSearch } from './integrations.mjs';
 
@@ -125,6 +130,39 @@ function requireUser(request) {
   const user = getUser(request);
   if (!user) throw new HttpError(401, 'سجّل الدخول للمتابعة.');
   return user;
+}
+
+function isBillingAdmin(user) {
+  const adminEmail = process.env.BILLING_ADMIN_EMAIL?.trim().toLowerCase();
+  return Boolean(adminEmail && user.email.toLowerCase() === adminEmail);
+}
+
+function requireBillingAdmin(user, request) {
+  if (!isBillingAdmin(user)) throw new HttpError(403, 'هذه الصفحة مخصصة لمسؤول الاشتراكات.');
+  const expected = process.env.BILLING_ADMIN_KEY?.trim();
+  if (!expected) throw new HttpError(503, 'اضبط BILLING_ADMIN_KEY على الخادم لتفعيل مراجعة الاشتراكات.');
+  const supplied = request.headers['x-billing-admin-key'];
+  const expectedBuffer = Buffer.from(expected);
+  const suppliedBuffer = Buffer.from(typeof supplied === 'string' ? supplied : '');
+  if (suppliedBuffer.length !== expectedBuffer.length || !timingSafeEqual(suppliedBuffer, expectedBuffer)) {
+    throw new HttpError(403, 'تعذر التحقق من صلاحية مسؤول الاشتراكات.');
+  }
+}
+
+function billingConfig() {
+  const price = Number.parseInt(process.env.MONTHLY_PRICE_EGP ?? '200', 10);
+  if (!Number.isSafeInteger(price) || price < 1) throw new HttpError(500, 'إعداد سعر الاشتراك غير صالح.');
+  return {
+    monthlyPriceEgp: price,
+    paymentNumber: process.env.VODAFONE_CASH_NUMBER?.trim() || '+201015707603',
+    adminConfigured: Boolean(process.env.BILLING_ADMIN_EMAIL?.trim()),
+  };
+}
+
+function requireActiveSubscription(user) {
+  if (!getActiveSubscription(user.id)) {
+    throw new HttpError(402, 'فعّل اشتراكك الشهري أولًا لاستخدام ميزات الذكاء الاصطناعي.');
+  }
 }
 
 function assertSameOrigin(request) {
@@ -444,6 +482,60 @@ async function handleRequest(request, response) {
     return;
   }
 
+  const billingUser = url.pathname.startsWith('/api/billing') ? requireUser(request) : null;
+  if (url.pathname === '/api/billing' && request.method === 'GET') {
+    const config = billingConfig();
+    sendJson(response, 200, {
+      ...config,
+      isAdmin: isBillingAdmin(billingUser),
+      subscription: getActiveSubscription(billingUser.id),
+      paymentRequests: listPaymentRequests(billingUser.id),
+    });
+    return;
+  }
+  if (url.pathname === '/api/billing/requests' && request.method === 'POST') {
+    const config = billingConfig();
+    if (!config.adminConfigured) throw new HttpError(503, 'لم يُضبط بريد مسؤول الاشتراكات بعد.');
+    const input = await readJson(request);
+    const transferReference = requireText(input.transferReference, 'رقم مرجع التحويل', 120);
+    if (/[\r\n]/.test(transferReference)) throw new HttpError(400, 'رقم مرجع التحويل غير صالح.');
+    try {
+      const paymentRequest = createPaymentRequest({
+        id: randomUUID(),
+        userId: billingUser.id,
+        amountEgp: config.monthlyPriceEgp,
+        transferReference,
+      });
+      sendJson(response, 201, { paymentRequest });
+    } catch (error) {
+      if (error?.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+        throw new HttpError(409, 'لديك طلب دفع قيد المراجعة بالفعل.');
+      }
+      throw error;
+    }
+    return;
+  }
+  if (url.pathname === '/api/billing/admin/requests' && request.method === 'GET') {
+    requireBillingAdmin(billingUser, request);
+    sendJson(response, 200, { requests: listPendingPaymentRequests() });
+    return;
+  }
+  const billingReviewMatch = url.pathname.match(/^\/api\/billing\/admin\/requests\/([a-f0-9-]{36})$/i);
+  if (billingReviewMatch && request.method === 'POST') {
+    requireBillingAdmin(billingUser, request);
+    const input = await readJson(request);
+    if (!['approve', 'reject'].includes(input.action)) throw new HttpError(400, 'إجراء المراجعة غير صالح.');
+    const result = reviewPaymentRequest({
+      id: billingReviewMatch[1],
+      adminUserId: billingUser.id,
+      approve: input.action === 'approve',
+    });
+    if (result === 'not_found') throw new HttpError(404, 'طلب الدفع غير موجود.');
+    if (result === 'already_reviewed') throw new HttpError(409, 'تمت مراجعة طلب الدفع بالفعل.');
+    sendJson(response, 200, { reviewed: true, status: input.action === 'approve' ? 'approved' : 'rejected' });
+    return;
+  }
+
   if (url.pathname.startsWith('/api/')) {
     const user = requireUser(request);
 
@@ -475,6 +567,7 @@ async function handleRequest(request, response) {
       const conversationId = requireText(input.conversationId, 'معرّف المحادثة', 64);
       const current = getConversation(user.id, conversationId);
       if (!current) throw new HttpError(404, 'المحادثة غير موجودة.');
+      requireActiveSubscription(user);
       const message = requireText(input.message, 'نص الرسالة', 16_000);
       const image = input.image ? validateImage(input.image) : null;
       const messages = [
@@ -497,6 +590,7 @@ async function handleRequest(request, response) {
     }
 
     if (url.pathname === '/api/documents/generate' && request.method === 'POST') {
+      requireActiveSubscription(user);
       const input = await readJson(request);
       const title = requireText(input.title, 'عنوان المستند', 200);
       const prompt = requireText(input.prompt, 'وصف المستند', 8_000);
@@ -541,15 +635,18 @@ async function handleRequest(request, response) {
     }
 
     if (url.pathname === '/api/audio/transcribe' && request.method === 'POST') {
+      requireActiveSubscription(user);
       sendJson(response, 200, { text: await transcribeAudio(await readJson(request)) });
       return;
     }
     if (url.pathname === '/api/audio/speech' && request.method === 'POST') {
+      requireActiveSubscription(user);
       await synthesizeSpeech(await readJson(request), response);
       return;
     }
 
     if (url.pathname === '/api/search' && request.method === 'POST') {
+      requireActiveSubscription(user);
       const input = await readJson(request);
       const query = requireText(input.query, 'عبارة البحث', 500);
       sendJson(response, 200, await webSearch(query));
@@ -561,6 +658,7 @@ async function handleRequest(request, response) {
       return;
     }
     if (url.pathname === '/api/integrations/email/send' && request.method === 'POST') {
+      requireActiveSubscription(user);
       const input = await readJson(request);
       if (input.confirmed !== true) throw new HttpError(400, 'أكد الإرسال صراحةً قبل إرسال البريد.');
       const to = requireText(input.to, 'عنوان البريد المستلم', 254);
@@ -599,6 +697,7 @@ async function handleRequest(request, response) {
     if (agentRunMatch && request.method === 'POST') {
       const agent = getAgent(user.id, agentRunMatch[1]);
       if (!agent) throw new HttpError(404, 'الوكيل غير موجود.');
+      requireActiveSubscription(user);
       const input = await readJson(request);
       const prompt = requireText(input.prompt, 'طلب الوكيل', 8_000);
       sendJson(response, 200, await runAgent(user, agent, prompt));

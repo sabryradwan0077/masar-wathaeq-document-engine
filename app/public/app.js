@@ -6,7 +6,7 @@ const chatInput = document.querySelector('#chat-input');
 const chatForm = document.querySelector('#chat-form');
 const sendButton = document.querySelector('#send-button');
 const toast = document.querySelector('#toast');
-const views = Object.fromEntries(['chat', 'documents', 'agents', 'integrations'].map((name) => [
+const views = Object.fromEntries(['chat', 'documents', 'agents', 'integrations', 'billing'].map((name) => [
   name, document.querySelector(`#${name}-view`),
 ]));
 
@@ -18,6 +18,8 @@ let pendingImage = null;
 let recording = false;
 let mediaRecorder = null;
 let toastTimer;
+let billingInfo = null;
+let adminKey = '';
 
 function showToast(message) {
   toast.textContent = message;
@@ -33,7 +35,10 @@ async function apiJson(url, options = {}) {
   });
   if (!response.ok) {
     const result = await response.json().catch(() => ({}));
-    throw new Error(result.error || 'تعذر تنفيذ الطلب.');
+    const error = new Error(result.error || 'تعذر تنفيذ الطلب.');
+    error.status = response.status;
+    if (response.status === 402 && currentView !== 'billing') selectView('billing');
+    throw error;
   }
   return response.json();
 }
@@ -59,12 +64,14 @@ function selectView(name) {
     documents: ['مساعدك في كتابة المستندات', 'المستندات'],
     agents: ['وكلاء بمهمات محددة', 'الوكلاء'],
     integrations: ['اتصل بأدوات عملك', 'التكاملات'],
+    billing: ['الخطة والدفع', 'اشتراكي'],
   };
   document.querySelector('#topbar-eyebrow').textContent = titles[name][0];
   document.querySelector('#topbar-title').textContent = titles[name][1];
   if (name === 'agents') void loadAgents();
   if (name === 'integrations') void loadIntegrationStatus();
   if (name === 'documents') void loadDocuments();
+  if (name === 'billing') void loadBilling();
 }
 
 function renderConversations() {
@@ -492,6 +499,7 @@ function showWorkspace(user) {
   document.querySelector('#app-shell').classList.remove('hidden');
   document.querySelector('#profile-name').textContent = user.displayName;
   document.querySelector('#profile-email').textContent = user.email;
+  adminKey = sessionStorage.getItem('masar-billing-admin-key') ?? '';
   void refreshConversations().catch((error) => showToast(error.message));
   void loadConfig();
 }
@@ -520,6 +528,8 @@ document.querySelector('#logout-button').addEventListener('click', async () => {
     await postJson('/api/auth/logout', {});
     conversations = [];
     activeConversationId = null;
+    adminKey = '';
+    sessionStorage.removeItem('masar-billing-admin-key');
     document.querySelector('#app-shell').classList.add('hidden');
     document.querySelector('#auth-screen').classList.remove('hidden');
   } catch (error) {
@@ -710,6 +720,161 @@ document.querySelector('#email-form').addEventListener('submit', async (event) =
     });
     showToast('تم إرسال البريد الإلكتروني.');
     event.currentTarget.reset();
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+const paymentStatuses = {
+  pending: 'قيد المراجعة',
+  approved: 'تم التفعيل',
+  rejected: 'مرفوض',
+};
+
+function formatDate(value) {
+  return new Intl.DateTimeFormat('ar-EG', { dateStyle: 'medium' }).format(new Date(value));
+}
+
+function renderPaymentHistory(requests) {
+  const container = document.querySelector('#payment-history-list');
+  container.replaceChildren();
+  if (!requests.length) {
+    const empty = document.createElement('p');
+    empty.className = 'billing-muted';
+    empty.textContent = 'لا توجد طلبات دفع بعد.';
+    container.append(empty);
+    return;
+  }
+  for (const request of requests) {
+    const item = document.createElement('div');
+    item.className = 'payment-history-item';
+    const info = document.createElement('span');
+    info.textContent = `${request.amountEgp} جنيه · مرجع ${request.transferReference} · ${formatDate(request.createdAt)}`;
+    const status = document.createElement('strong');
+    status.className = `payment-status ${request.status}`;
+    status.textContent = paymentStatuses[request.status] ?? request.status;
+    item.append(info, status);
+    container.append(item);
+  }
+}
+
+async function loadBilling() {
+  try {
+    billingInfo = await apiJson('/api/billing');
+    document.querySelector('#monthly-price').textContent = String(billingInfo.monthlyPriceEgp);
+    document.querySelector('#vodafone-number').textContent = billingInfo.paymentNumber;
+    const statusElement = document.querySelector('#subscription-status');
+    if (billingInfo.subscription) {
+      statusElement.textContent = `اشتراكك مفعّل حتى ${formatDate(billingInfo.subscription.expiresAt)}.`;
+      statusElement.classList.add('active');
+    } else {
+      statusElement.textContent = 'لا يوجد اشتراك مفعّل. أرسل طلب التفعيل بعد التحويل.';
+      statusElement.classList.remove('active');
+    }
+    const hasPending = billingInfo.paymentRequests.some((request) => request.status === 'pending');
+    const form = document.querySelector('#payment-request-form');
+    form.classList.toggle('hidden', hasPending);
+    renderPaymentHistory(billingInfo.paymentRequests);
+    const adminPanel = document.querySelector('#admin-billing-panel');
+    adminPanel.classList.toggle('hidden', !billingInfo.isAdmin);
+    if (billingInfo.isAdmin) await loadPendingPayments();
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function loadPendingPayments() {
+  const container = document.querySelector('#admin-payment-requests');
+  if (!adminKey) {
+    const empty = document.createElement('p');
+    empty.className = 'billing-muted';
+    empty.textContent = 'أدخل رمز المسؤول لمراجعة طلبات الدفع.';
+    container.replaceChildren(empty);
+    return;
+  }
+  const { requests } = await apiJson('/api/billing/admin/requests', {
+    headers: { 'x-billing-admin-key': adminKey },
+  });
+  container.replaceChildren();
+  if (!requests.length) {
+    const empty = document.createElement('p');
+    empty.className = 'billing-muted';
+    empty.textContent = 'لا توجد طلبات بانتظار المراجعة.';
+    container.append(empty);
+    return;
+  }
+  for (const request of requests) {
+    const card = document.createElement('article');
+    card.className = 'admin-payment-request';
+    const name = document.createElement('strong');
+    name.textContent = request.displayName;
+    const details = document.createElement('p');
+    details.textContent = `${request.email} · ${request.amountEgp} جنيه · مرجع التحويل: ${request.transferReference}`;
+    const date = document.createElement('small');
+    date.textContent = formatDate(request.createdAt);
+    const actions = document.createElement('div');
+    actions.className = 'payment-review-actions';
+    for (const action of ['approve', 'reject']) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = action === 'approve' ? 'primary-button' : 'secondary-button';
+      button.textContent = action === 'approve' ? 'تأكيد الدفع والتفعيل' : 'رفض الطلب';
+      button.addEventListener('click', () => void reviewPayment(request.id, action, button));
+      actions.append(button);
+    }
+    card.append(name, details, date, actions);
+    container.append(card);
+  }
+}
+
+async function reviewPayment(id, action, button) {
+  button.disabled = true;
+  try {
+    await apiJson(`/api/billing/admin/requests/${encodeURIComponent(id)}`, {
+      method: 'POST',
+      headers: { 'x-billing-admin-key': adminKey },
+      body: JSON.stringify({ action }),
+    });
+    showToast(action === 'approve' ? 'تم تفعيل الاشتراك لشهر.' : 'تم رفض طلب الدفع.');
+    await loadBilling();
+  } catch (error) {
+    showToast(error.message);
+    button.disabled = false;
+  }
+}
+
+document.querySelector('#admin-key-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const button = document.querySelector('#admin-key-submit');
+  adminKey = document.querySelector('#admin-key').value;
+  button.disabled = true;
+  try {
+    await loadPendingPayments();
+    sessionStorage.setItem('masar-billing-admin-key', adminKey);
+    document.querySelector('#admin-key').value = '';
+    showToast('تم فتح قائمة مراجعة الاشتراكات.');
+  } catch (error) {
+    adminKey = '';
+    sessionStorage.removeItem('masar-billing-admin-key');
+    showToast(error.message);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.querySelector('#payment-request-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const button = document.querySelector('#payment-request-submit');
+  button.disabled = true;
+  try {
+    await postJson('/api/billing/requests', {
+      transferReference: document.querySelector('#transfer-reference').value.trim(),
+    });
+    event.currentTarget.reset();
+    showToast('وصل طلبك. سيُفعّل الاشتراك بعد مراجعة التحويل.');
+    await loadBilling();
   } catch (error) {
     showToast(error.message);
   } finally {

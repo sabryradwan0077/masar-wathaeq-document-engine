@@ -38,6 +38,7 @@
           <button class="nav-link" data-view="documents" type="button"><span aria-hidden="true">▤</span> المستندات</button>
           <button class="nav-link" data-view="agents" type="button"><span aria-hidden="true">⌘</span> الوكلاء</button>
           <button class="nav-link" data-view="integrations" type="button"><span aria-hidden="true">⤳</span> التكاملات</button>
+          <button class="nav-link" data-view="billing" type="button"><span aria-hidden="true">◇</span> اشتراكي</button>
         </nav>
         <div class="sidebar-label">محادثاتك الأخيرة</div>
         <div class="conversation-list" id="conversation-list"></div>
@@ -190,6 +191,38 @@
               <p class="privacy-note">لا تُرسل الرسالة إلا بعد تأكيد نافذة المراجعة.</p>
             </section>
             <div class="integration-status-card"><strong>حالة الإعداد</strong><span id="integration-status">جارٍ التحقق...</span><small>تُضبط مفاتيح Tavily وSMTP على الخادم في ملف .env.</small></div>
+          </div>
+        </section>
+
+        <section class="view-panel billing-view hidden" id="billing-view">
+          <div class="billing-layout">
+            <section class="feature-panel subscription-panel">
+              <div class="section-heading"><span class="section-icon">◇</span><div><h2>اشتراك مسار الشهري</h2><p>دفع يدوي عبر Vodafone Cash مع مراجعة التحويل قبل التفعيل.</p></div></div>
+              <div class="subscription-price"><strong id="monthly-price">200</strong><span>جنيه مصري / شهر</span></div>
+              <div class="payment-instructions">
+                <p>حوّل قيمة الاشتراك إلى رقم Vodafone Cash:</p>
+                <strong id="vodafone-number" dir="ltr">+201015707603</strong>
+                <small>بعد التحويل، أرسل رقم مرجع العملية. ستُفعّل المزايا بعد مراجعة المسؤول.</small>
+              </div>
+              <div class="subscription-status" id="subscription-status">جارٍ التحقق من حالة اشتراكك...</div>
+              <form id="payment-request-form">
+                <label for="transfer-reference">رقم مرجع التحويل</label>
+                <input id="transfer-reference" maxlength="120" required placeholder="اكتب الرقم الظاهر في رسالة تأكيد التحويل">
+                <label class="payment-confirm"><input type="checkbox" id="payment-confirm" required> أؤكد أنني حوّلت المبلغ الموضح إلى الرقم أعلاه.</label>
+                <button class="primary-button" id="payment-request-submit" type="submit">إرسال طلب التفعيل</button>
+              </form>
+              <div class="payment-history"><strong>طلبات الدفع</strong><div id="payment-history-list"></div></div>
+            </section>
+            <section class="feature-panel admin-billing-panel hidden" id="admin-billing-panel">
+              <div class="section-heading"><span class="section-icon">✓</span><div><h2>مراجعة طلبات الدفع</h2><p>طابق مرجع التحويل مع سجل Vodafone Cash قبل اتخاذ الإجراء.</p></div></div>
+              <form id="admin-key-form" class="admin-key-form">
+                <label for="admin-key">رمز مسؤول الاشتراكات</label>
+                <input id="admin-key" type="password" autocomplete="off" required placeholder="أدخل BILLING_ADMIN_KEY المضبوط على الخادم">
+                <button class="secondary-button" type="submit" id="admin-key-submit">فتح قائمة المراجعة</button>
+              </form>
+              <div id="admin-payment-requests"></div>
+            </section>
+            <p class="billing-note">لا ترسل بيانات البطاقة أو الرقم السري للمحفظة. لا يتم تفعيل الاشتراك تلقائيًا عند إرسال الطلب.</p>
           </div>
         </section>
       </main>

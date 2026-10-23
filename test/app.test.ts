@@ -20,6 +20,10 @@ before(async () => {
   process.env.TAVILY_API_KEY = '';
   process.env.SMTP_URL = '';
   process.env.SMTP_FROM = '';
+  process.env.BILLING_ADMIN_EMAIL = 'admin@example.test';
+  process.env.BILLING_ADMIN_KEY = 'test-billing-admin-key';
+  process.env.MONTHLY_PRICE_EGP = '200';
+  process.env.VODAFONE_CASH_NUMBER = '+201015707603';
   database = await import('../app/database.mjs');
   const { createAppServer } = await import('../app/server.mjs');
   server = createAppServer();
@@ -66,7 +70,7 @@ after(async () => {
 
 async function api(
   route: string,
-  options: { method?: string; body?: unknown; cookie?: string } = {},
+  options: { method?: string; body?: unknown; cookie?: string; adminKey?: string } = {},
 ) {
   const response = await fetch(`${baseUrl}${route}`, {
     method: options.method ?? 'GET',
@@ -74,6 +78,7 @@ async function api(
       ...(options.body ? { 'content-type': 'application/json' } : {}),
       ...(options.method && options.method !== 'GET' ? { origin: baseUrl } : {}),
       ...(options.cookie ? { cookie: options.cookie } : {}),
+      ...(options.adminKey ? { 'x-billing-admin-key': options.adminKey } : {}),
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
@@ -108,12 +113,11 @@ test('registration creates an authenticated account with isolated conversations'
     cookie: firstCookie,
     body: { conversationId, message: 'مرحبا' },
   });
-  assert.equal(chat.response.status, 503);
-  assert.match(chat.body.error, /مفتاح مزود الذكاء الاصطناعي/);
+  assert.equal(chat.response.status, 402);
+  assert.match(chat.body.error, /فعّل اشتراكك/);
 
   const persisted = await api(`/api/conversations/${conversationId}`, { cookie: firstCookie });
-  assert.equal(persisted.body.conversation.messages.length, 1);
-  assert.equal(persisted.body.conversation.messages[0].content, 'مرحبا');
+  assert.equal(persisted.body.conversation.messages.length, 0);
 
   const agent = await api('/api/agents', {
     method: 'POST',
@@ -164,6 +168,81 @@ test('authentication rejects bad passwords and enforces session access', async (
     body: { displayName: 'Duplicate', email: 'first@example.test', password: 'a-strong-password' },
   });
   assert.equal(duplicate.response.status, 409);
+});
+
+test('Vodafone Cash payments require admin approval before AI access', async () => {
+  const userLogin = await api('/api/auth/login', {
+    method: 'POST',
+    body: { email: 'first@example.test', password: 'a-strong-password' },
+  });
+  const userCookie = userLogin.response.headers.get('set-cookie')?.split(';')[0];
+  assert.ok(userCookie);
+
+  const billing = await api('/api/billing', { cookie: userCookie });
+  assert.equal(billing.response.status, 200);
+  assert.equal(billing.body.monthlyPriceEgp, 200);
+  assert.equal(billing.body.paymentNumber, '+201015707603');
+  assert.equal(billing.body.isAdmin, false);
+  assert.equal(billing.body.subscription, null);
+
+  const request = await api('/api/billing/requests', {
+    method: 'POST',
+    cookie: userCookie,
+    body: { transferReference: 'VC-TRANSFER-12345' },
+  });
+  assert.equal(request.response.status, 201);
+  assert.equal(request.body.paymentRequest.status, 'pending');
+
+  const duplicate = await api('/api/billing/requests', {
+    method: 'POST', cookie: userCookie, body: { transferReference: 'VC-TRANSFER-67890' },
+  });
+  assert.equal(duplicate.response.status, 409);
+  const forbidden = await api('/api/billing/admin/requests', { cookie: userCookie });
+  assert.equal(forbidden.response.status, 403);
+
+  const adminRegistration = await api('/api/auth/register', {
+    method: 'POST',
+    body: { displayName: 'مسؤول الاشتراكات', email: 'admin@example.test', password: 'admin-strong-password' },
+  });
+  assert.equal(adminRegistration.response.status, 201);
+  const adminCookie = adminRegistration.response.headers.get('set-cookie')?.split(';')[0];
+  assert.ok(adminCookie);
+  const missingKey = await api('/api/billing/admin/requests', { cookie: adminCookie });
+  assert.equal(missingKey.response.status, 403);
+  const queue = await api('/api/billing/admin/requests', {
+    cookie: adminCookie, adminKey: 'test-billing-admin-key',
+  });
+  assert.equal(queue.body.requests.length, 1);
+  assert.equal(queue.body.requests[0].transferReference, 'VC-TRANSFER-12345');
+  assert.equal(queue.body.requests[0].email, 'first@example.test');
+  const wrongKey = await api('/api/billing/admin/requests', {
+    cookie: adminCookie, adminKey: 'incorrect-admin-key',
+  });
+  assert.equal(wrongKey.response.status, 403);
+
+  const approved = await api(`/api/billing/admin/requests/${request.body.paymentRequest.id}`, {
+    method: 'POST', cookie: adminCookie, adminKey: 'test-billing-admin-key', body: { action: 'approve' },
+  });
+  assert.equal(approved.response.status, 200);
+
+  const activeBilling = await api('/api/billing', { cookie: userCookie });
+  assert.ok(activeBilling.body.subscription);
+  assert.ok(Date.parse(activeBilling.body.subscription.expiresAt) > Date.now());
+  const duplicateReview = await api(`/api/billing/admin/requests/${request.body.paymentRequest.id}`, {
+    method: 'POST', cookie: adminCookie, adminKey: 'test-billing-admin-key', body: { action: 'approve' },
+  });
+  assert.equal(duplicateReview.response.status, 409);
+
+  const rejectedRequest = await api('/api/billing/requests', {
+    method: 'POST',
+    cookie: adminCookie,
+    body: { transferReference: 'VC-TRANSFER-REJECT' },
+  });
+  assert.equal(rejectedRequest.response.status, 201);
+  const rejected = await api(`/api/billing/admin/requests/${rejectedRequest.body.paymentRequest.id}`, {
+    method: 'POST', cookie: adminCookie, adminKey: 'test-billing-admin-key', body: { action: 'reject' },
+  });
+  assert.equal(rejected.response.status, 200);
 });
 
 test('multimodal chat, speech, and generated document use the configured provider', async () => {
