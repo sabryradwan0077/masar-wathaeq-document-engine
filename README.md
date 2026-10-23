@@ -71,7 +71,7 @@ The repository also includes an Arabic-first web app in `app/` that uses the doc
 - user-configurable agents with optional web search, document drafting, and email drafting tools;
 - Tavily web search and SMTP email sending (with a separate confirmation before sending);
 
-To run it locally, use Node.js 20.18 or later, copy `.env.example` to `.env`, set `AI_API_KEY` and `AI_API_BASE_URL` / `AI_MODEL` as needed, then run:
+To run it locally, use Node.js 22 or later, copy `.env.example` to `.env`, set `AI_API_KEY` and `AI_API_BASE_URL` / `AI_MODEL` as needed, then run:
 
 ```bash
 npm run dev
