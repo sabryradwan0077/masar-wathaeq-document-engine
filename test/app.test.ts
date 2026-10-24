@@ -3,6 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { after, before, test } from 'node:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { Document, Packer, Paragraph } from 'docx';
+import { MAX_UPLOAD_BYTES } from '../app/file-search.mjs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -271,6 +272,10 @@ test('uploaded PDF, Word, and text files are private, searchable, and downloadab
   assert.equal(deleted.response.status, 200);
   const noLongerSearchable = await api(`/api/files/search?q=${encodeURIComponent('اجازة سنويه')}`, { cookie });
   assert.deepEqual(noLongerSearchable.body.results, []);
+});
+
+test('document upload limit is 100 MiB per file', () => {
+  assert.equal(MAX_UPLOAD_BYTES, 100 * 1024 * 1024);
 });
 
 test('Vodafone Cash payments require admin approval before AI access', async () => {
