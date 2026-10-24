@@ -18,7 +18,7 @@ export async function extractUploadedText(file) {
     throw new FileInputError('الملف فارغ أو لم يصل بصورة صحيحة.');
   }
   if (file.data.length > MAX_UPLOAD_BYTES) {
-    throw new FileInputError('الحد الأقصى لحجم الملف الواحد هو 10 ميجابايت.');
+    throw new FileInputError('الحد الأقصى لحجم الملف الواحد هو 100 ميجابايت.');
   }
 
   const extension = path.extname(file.filename).toLowerCase();

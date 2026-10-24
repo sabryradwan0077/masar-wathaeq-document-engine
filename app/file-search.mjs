@@ -1,4 +1,4 @@
-export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 export const MAX_EXTRACTED_CHARS = 1_000_000;
 export const MAX_USER_FILE_BYTES = 100 * 1024 * 1024;
 export const MAX_USER_FILES = 30;

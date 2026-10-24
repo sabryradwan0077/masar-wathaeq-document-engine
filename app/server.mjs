@@ -100,7 +100,7 @@ async function readUploadedFile(request) {
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > maxMultipartBytes) throw new HttpError(413, 'الحد الأقصى لحجم الملف الواحد هو 10 ميجابايت.');
+    if (size > maxMultipartBytes) throw new HttpError(413, 'الحد الأقصى لحجم الملف الواحد هو 100 ميجابايت.');
     chunks.push(chunk);
   }
   let upload = null;
@@ -136,7 +136,7 @@ async function readUploadedFile(request) {
     if (error instanceof HttpError) throw error;
     throw new HttpError(400, 'تعذر قراءة الملف المرفوع.');
   }
-  if (oversized) throw new HttpError(413, 'الحد الأقصى لحجم الملف الواحد هو 10 ميجابايت.');
+  if (oversized) throw new HttpError(413, 'الحد الأقصى لحجم الملف الواحد هو 100 ميجابايت.');
   if (invalidField) throw new HttpError(400, 'ارفع الملف في الحقل المخصص له.');
   if (!upload) throw new HttpError(400, 'اختر ملفًا لرفعه.');
   return upload;
