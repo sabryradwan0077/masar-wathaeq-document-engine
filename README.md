@@ -64,7 +64,7 @@ console.log(result.rendered);
 
 The repository also includes an Arabic-first web app in `app/` that uses the document engine:
 
-- local email/password accounts, server-side sessions, and SQLite persistence for conversations and agents;
+- email/password accounts, server-side sessions, and persistent storage for conversations and agents;
 - chat with an OpenAI-compatible AI provider, including image analysis;
 - voice transcription and text-to-speech through compatible audio endpoints;
 - editable AI document drafts with DOCX and HTML export;
@@ -78,7 +78,7 @@ To run it locally, use Node.js 22 or later, copy `.env.example` to `.env`, set `
 npm run dev
 ```
 
-Open `http://127.0.0.1:4173` and create an account. Set `TAVILY_API_KEY` to enable web search, and `SMTP_URL` plus `SMTP_FROM` to enable email. AI model names for vision, transcription, and speech can be overridden with the corresponding `AI_*_MODEL` variables. The SQLite database defaults to `data/masar.sqlite` and can be moved using `MASAR_DATABASE_PATH`. The default Vodafone Cash number is `+201015707603` and the monthly price is 200 EGP; configure `VODAFONE_CASH_NUMBER`, `MONTHLY_PRICE_EGP`, `BILLING_ADMIN_EMAIL`, and a strong, private `BILLING_ADMIN_KEY` for a deployment. Generate a key with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"` and set it only in the server's ignored `.env`. The account matching `BILLING_ADMIN_EMAIL` must also provide the key in the billing screen before reviewing requests. Users submit a transfer reference after paying; an administrator must manually verify the transfer and approve or reject each request. AI and business-integration operations require an active approved subscription; accounts and billing remain accessible before payment.
+Open `http://127.0.0.1:4173` and create an account. Local development uses SQLite at `data/masar.sqlite` by default; set `MASAR_DATABASE_PATH` to move it. Set `DATABASE_URL` to use PostgreSQL instead. Production requires `DATABASE_URL` so accounts and subscriptions cannot silently be stored on an ephemeral filesystem. Set `TAVILY_API_KEY` to enable web search, and `SMTP_URL` plus `SMTP_FROM` to enable email. AI model names for vision, transcription, and speech can be overridden with the corresponding `AI_*_MODEL` variables. The default Vodafone Cash number is `+201015707603` and the monthly price is 200 EGP; configure `VODAFONE_CASH_NUMBER`, `MONTHLY_PRICE_EGP`, `BILLING_ADMIN_EMAIL`, and a strong, private `BILLING_ADMIN_KEY` for a deployment. Generate a key with `node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"` and set it only in the server's ignored `.env`. The account matching `BILLING_ADMIN_EMAIL` must also provide the key in the billing screen before reviewing requests. Users submit a transfer reference after paying; an administrator must manually verify the transfer and approve or reject each request. AI and business-integration operations require an active approved subscription; accounts and billing remain accessible before payment.
 
 Provider configuration examples:
 
@@ -97,7 +97,11 @@ VODAFONE_CASH_NUMBER=+201015707603
 
 If SMTP credentials contain reserved URL characters, percent-encode them in `SMTP_URL`.
 
-All API keys and SMTP credentials stay on the server. Uploaded image and audio content is sent to the configured AI provider for the requested operation; image files and audio recordings are not stored by the app. Account passwords use scrypt hashes, session tokens are stored as hashes, and browser sessions use HttpOnly, SameSite cookies. Back up the SQLite database securely. This remains an early single-server MVP: it does not include email verification, password recovery, account administration, tenant sharing, billing, image generation, or OAuth. The default server binds to localhost; do not expose it publicly without HTTPS, backups, abuse controls, and a reviewed deployment configuration.
+### Free public demo deployment
+
+The optional `render.yaml` blueprint deploys the app as a free Render web service. Its filesystem is ephemeral, so production startup refuses to run without an external PostgreSQL `DATABASE_URL`. Create a free PostgreSQL database with [Neon](https://neon.tech/), then use the Render dashboard to create a Blueprint Instance for this repository and enter the database connection string when prompted. Add `AI_API_KEY`, `BILLING_ADMIN_EMAIL`, and a strong `BILLING_ADMIN_KEY` as private Render environment variables before deployment; optional Tavily and SMTP integrations can be configured there too. Render will provide the public HTTPS URL after the first successful deployment. Free web services sleep when idle and may take time to wake; free database plans have provider-specific capacity and retention limits.
+
+All API keys and SMTP credentials stay on the server. Uploaded image and audio content is sent to the configured AI provider for the requested operation; image files and audio recordings are not stored by the app. Account passwords use scrypt hashes, session tokens are stored as hashes, and browser sessions use HttpOnly, SameSite cookies. Back up the SQLite database securely when using local development, and configure backups for the managed PostgreSQL database in production. This remains an early single-server MVP: it does not include email verification, password recovery, account administration, tenant sharing, billing, image generation, or OAuth.
 
 ## Architecture
 

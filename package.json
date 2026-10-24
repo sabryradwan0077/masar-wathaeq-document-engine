@@ -30,7 +30,8 @@
   "dependencies": {
     "better-sqlite3": "^13.0.3",
     "docx": "^9.7.1",
-    "nodemailer": "^10.2.1"
+    "nodemailer": "^10.2.1",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "@types/node": "^20.19.0",

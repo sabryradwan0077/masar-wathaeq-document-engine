@@ -17,7 +17,6 @@ import {
 import {
   createSession,
   createUser,
-  db,
   deleteAgent,
   deleteConversation,
   deleteDocument,
@@ -38,6 +37,7 @@ import {
   saveConversation,
   saveDocument,
   reviewPaymentRequest,
+  isUniqueConstraintError,
 } from './database.mjs';
 import { IntegrationError, integrationStatus, sendEmail, webSearch } from './integrations.mjs';
 
@@ -120,14 +120,14 @@ function getRequestToken(request) {
   return cookie?.slice(SESSION_COOKIE.length + 1) || '';
 }
 
-function getUser(request) {
+async function getUser(request) {
   const token = getRequestToken(request);
   if (!token) return null;
-  return getSessionUser(hashToken(token)) ?? null;
+  return (await getSessionUser(hashToken(token))) ?? null;
 }
 
-function requireUser(request) {
-  const user = getUser(request);
+async function requireUser(request) {
+  const user = await getUser(request);
   if (!user) throw new HttpError(401, 'سجّل الدخول للمتابعة.');
   return user;
 }
@@ -159,8 +159,8 @@ function billingConfig() {
   };
 }
 
-function requireActiveSubscription(user) {
-  if (!getActiveSubscription(user.id)) {
+async function requireActiveSubscription(user) {
+  if (!(await getActiveSubscription(user.id))) {
     throw new HttpError(402, 'فعّل اشتراكك الشهري أولًا لاستخدام ميزات الذكاء الاصطناعي.');
   }
 }
@@ -436,7 +436,7 @@ async function handleRequest(request, response) {
   }
 
   if (url.pathname === '/api/auth/session' && request.method === 'GET') {
-    sendJson(response, 200, { user: getUser(request) });
+    sendJson(response, 200, { user: await getUser(request) });
     return;
   }
 
@@ -453,22 +453,22 @@ async function handleRequest(request, response) {
     if (url.pathname === '/api/auth/register') {
       if (password.length < 10) throw new HttpError(400, 'يجب أن تتكون كلمة المرور من 10 أحرف على الأقل.');
       const displayName = requireText(input.displayName, 'الاسم', 80);
-      if (getUserByEmail(email)) throw new HttpError(409, 'يوجد حساب مسجل بهذا البريد الإلكتروني.');
+      if (await getUserByEmail(email)) throw new HttpError(409, 'يوجد حساب مسجل بهذا البريد الإلكتروني.');
       try {
-        user = createUser({ id: randomUUID(), email, displayName, passwordHash: await hashPassword(password) });
+        user = await createUser({ id: randomUUID(), email, displayName, passwordHash: await hashPassword(password) });
       } catch (error) {
-        if (error?.code === 'SQLITE_CONSTRAINT_UNIQUE') throw new HttpError(409, 'يوجد حساب مسجل بهذا البريد الإلكتروني.');
+        if (isUniqueConstraintError(error)) throw new HttpError(409, 'يوجد حساب مسجل بهذا البريد الإلكتروني.');
         throw error;
       }
     } else {
-      const account = getUserByEmail(email);
+      const account = await getUserByEmail(email);
       if (!account || !(await verifyPassword(password, account.passwordHash))) {
         throw new HttpError(401, 'البريد الإلكتروني أو كلمة المرور غير صحيحة.');
       }
       user = { id: account.id, email: account.email, displayName: account.displayName, createdAt: account.createdAt };
     }
     const token = createSessionToken();
-    createSession({ tokenHash: hashToken(token), userId: user.id, expiresAt: sessionExpiry() });
+    await createSession({ tokenHash: hashToken(token), userId: user.id, expiresAt: sessionExpiry() });
     response.setHeader('set-cookie', sessionCookie(token, secureCookie(request)));
     sendJson(response, 201, { user });
     return;
@@ -476,20 +476,20 @@ async function handleRequest(request, response) {
 
   if (url.pathname === '/api/auth/logout' && request.method === 'POST') {
     const token = getRequestToken(request);
-    if (token) deleteSession(hashToken(token));
+    if (token) await deleteSession(hashToken(token));
     response.setHeader('set-cookie', expiredSessionCookie(secureCookie(request)));
     sendJson(response, 200, { loggedOut: true });
     return;
   }
 
-  const billingUser = url.pathname.startsWith('/api/billing') ? requireUser(request) : null;
+  const billingUser = url.pathname.startsWith('/api/billing') ? await requireUser(request) : null;
   if (url.pathname === '/api/billing' && request.method === 'GET') {
     const config = billingConfig();
     sendJson(response, 200, {
       ...config,
       isAdmin: isBillingAdmin(billingUser),
-      subscription: getActiveSubscription(billingUser.id),
-      paymentRequests: listPaymentRequests(billingUser.id),
+      subscription: await getActiveSubscription(billingUser.id),
+      paymentRequests: await listPaymentRequests(billingUser.id),
     });
     return;
   }
@@ -500,7 +500,7 @@ async function handleRequest(request, response) {
     const transferReference = requireText(input.transferReference, 'رقم مرجع التحويل', 120);
     if (/[\r\n]/.test(transferReference)) throw new HttpError(400, 'رقم مرجع التحويل غير صالح.');
     try {
-      const paymentRequest = createPaymentRequest({
+      const paymentRequest = await createPaymentRequest({
         id: randomUUID(),
         userId: billingUser.id,
         amountEgp: config.monthlyPriceEgp,
@@ -508,7 +508,7 @@ async function handleRequest(request, response) {
       });
       sendJson(response, 201, { paymentRequest });
     } catch (error) {
-      if (error?.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+      if (isUniqueConstraintError(error)) {
         throw new HttpError(409, 'لديك طلب دفع قيد المراجعة بالفعل.');
       }
       throw error;
@@ -517,7 +517,7 @@ async function handleRequest(request, response) {
   }
   if (url.pathname === '/api/billing/admin/requests' && request.method === 'GET') {
     requireBillingAdmin(billingUser, request);
-    sendJson(response, 200, { requests: listPendingPaymentRequests() });
+    sendJson(response, 200, { requests: await listPendingPaymentRequests() });
     return;
   }
   const billingReviewMatch = url.pathname.match(/^\/api\/billing\/admin\/requests\/([a-f0-9-]{36})$/i);
@@ -525,7 +525,7 @@ async function handleRequest(request, response) {
     requireBillingAdmin(billingUser, request);
     const input = await readJson(request);
     if (!['approve', 'reject'].includes(input.action)) throw new HttpError(400, 'إجراء المراجعة غير صالح.');
-    const result = reviewPaymentRequest({
+    const result = await reviewPaymentRequest({
       id: billingReviewMatch[1],
       adminUserId: billingUser.id,
       approve: input.action === 'approve',
@@ -537,27 +537,27 @@ async function handleRequest(request, response) {
   }
 
   if (url.pathname.startsWith('/api/')) {
-    const user = requireUser(request);
+    const user = await requireUser(request);
 
     if (url.pathname === '/api/conversations' && request.method === 'GET') {
-      sendJson(response, 200, { conversations: listConversations(user.id) });
+      sendJson(response, 200, { conversations: await listConversations(user.id) });
       return;
     }
     if (url.pathname === '/api/conversations' && request.method === 'POST') {
       const id = randomUUID();
-      saveConversation(user.id, id, []);
-      sendJson(response, 201, { conversation: getConversation(user.id, id) });
+      await saveConversation(user.id, id, []);
+      sendJson(response, 201, { conversation: await getConversation(user.id, id) });
       return;
     }
     const conversationMatch = url.pathname.match(/^\/api\/conversations\/([a-f0-9-]{36})$/i);
     if (conversationMatch && request.method === 'GET') {
-      const conversation = getConversation(user.id, conversationMatch[1]);
+      const conversation = await getConversation(user.id, conversationMatch[1]);
       if (!conversation) throw new HttpError(404, 'المحادثة غير موجودة.');
       sendJson(response, 200, { conversation });
       return;
     }
     if (conversationMatch && request.method === 'DELETE') {
-      if (!deleteConversation(user.id, conversationMatch[1])) throw new HttpError(404, 'المحادثة غير موجودة.');
+      if (!(await deleteConversation(user.id, conversationMatch[1]))) throw new HttpError(404, 'المحادثة غير موجودة.');
       sendJson(response, 200, { deleted: true });
       return;
     }
@@ -565,9 +565,9 @@ async function handleRequest(request, response) {
     if (url.pathname === '/api/chat' && request.method === 'POST') {
       const input = await readJson(request);
       const conversationId = requireText(input.conversationId, 'معرّف المحادثة', 64);
-      const current = getConversation(user.id, conversationId);
+      const current = await getConversation(user.id, conversationId);
       if (!current) throw new HttpError(404, 'المحادثة غير موجودة.');
-      requireActiveSubscription(user);
+      await requireActiveSubscription(user);
       const message = requireText(input.message, 'نص الرسالة', 16_000);
       const image = input.image ? validateImage(input.image) : null;
       const messages = [
@@ -581,16 +581,16 @@ async function handleRequest(request, response) {
         createdAt: new Date().toISOString(),
       };
       const savedMessages = [...current.messages, userMessage];
-      saveConversation(user.id, conversationId, savedMessages);
+      await saveConversation(user.id, conversationId, savedMessages);
       const content = await requestAi(messages, 'أنت مساعد ذكي عربي ودود ودقيق. أجب بلغة المستخدم، ونظّم الإجابة بوضوح، ولا تدّعِ تنفيذ إجراءات لم تنفذها.', image);
       savedMessages.push({ id: randomUUID(), role: 'assistant', content, createdAt: new Date().toISOString() });
-      saveConversation(user.id, conversationId, savedMessages);
-      sendJson(response, 200, { content, conversation: getConversation(user.id, conversationId) });
+      await saveConversation(user.id, conversationId, savedMessages);
+      sendJson(response, 200, { content, conversation: await getConversation(user.id, conversationId) });
       return;
     }
 
     if (url.pathname === '/api/documents/generate' && request.method === 'POST') {
-      requireActiveSubscription(user);
+      await requireActiveSubscription(user);
       const input = await readJson(request);
       const title = requireText(input.title, 'عنوان المستند', 200);
       const prompt = requireText(input.prompt, 'وصف المستند', 8_000);
@@ -598,18 +598,18 @@ async function handleRequest(request, response) {
         [{ role: 'user', content: `أنشئ مسودة مستند عربي احترافي بعنوان "${title}" وفق المتطلبات التالية. أعد نص المستند فقط دون مقدمات أو تنسيق Markdown:\n\n${prompt}` }],
         'أنت محرر مستندات أعمال باللغة العربية. اكتب مستندًا واضحًا ومهنيًا، واستخدم حقولًا فارغة بين أقواس مربعة عند غياب بيانات واقعية. لا تختلق أسماء أو أرقامًا أو حقائق.',
       );
-      const document = saveDocument(user.id, { id: randomUUID(), title, content });
+      const document = await saveDocument(user.id, { id: randomUUID(), title, content });
       sendJson(response, 200, { document });
       return;
     }
     if (url.pathname === '/api/documents' && request.method === 'GET') {
-      sendJson(response, 200, { documents: listDocuments(user.id) });
+      sendJson(response, 200, { documents: await listDocuments(user.id) });
       return;
     }
     if (url.pathname === '/api/documents' && request.method === 'POST') {
       const input = await readJson(request);
       const id = input.id ? requireUuid(input.id, 'معرّف المستند') : randomUUID();
-      const document = saveDocument(user.id, {
+      const document = await saveDocument(user.id, {
         id,
         title: requireText(input.title, 'عنوان المستند', 200),
         content: requireText(input.content, 'محتوى المستند', 50_000),
@@ -619,13 +619,13 @@ async function handleRequest(request, response) {
     }
     const documentMatch = url.pathname.match(/^\/api\/documents\/([a-f0-9-]{36})$/i);
     if (documentMatch && request.method === 'GET') {
-      const document = getDocument(user.id, documentMatch[1]);
+      const document = await getDocument(user.id, documentMatch[1]);
       if (!document) throw new HttpError(404, 'المستند غير موجود.');
       sendJson(response, 200, { document });
       return;
     }
     if (documentMatch && request.method === 'DELETE') {
-      if (!deleteDocument(user.id, documentMatch[1])) throw new HttpError(404, 'المستند غير موجود.');
+      if (!(await deleteDocument(user.id, documentMatch[1]))) throw new HttpError(404, 'المستند غير موجود.');
       sendJson(response, 200, { deleted: true });
       return;
     }
@@ -635,18 +635,18 @@ async function handleRequest(request, response) {
     }
 
     if (url.pathname === '/api/audio/transcribe' && request.method === 'POST') {
-      requireActiveSubscription(user);
+      await requireActiveSubscription(user);
       sendJson(response, 200, { text: await transcribeAudio(await readJson(request)) });
       return;
     }
     if (url.pathname === '/api/audio/speech' && request.method === 'POST') {
-      requireActiveSubscription(user);
+      await requireActiveSubscription(user);
       await synthesizeSpeech(await readJson(request), response);
       return;
     }
 
     if (url.pathname === '/api/search' && request.method === 'POST') {
-      requireActiveSubscription(user);
+      await requireActiveSubscription(user);
       const input = await readJson(request);
       const query = requireText(input.query, 'عبارة البحث', 500);
       sendJson(response, 200, await webSearch(query));
@@ -658,7 +658,7 @@ async function handleRequest(request, response) {
       return;
     }
     if (url.pathname === '/api/integrations/email/send' && request.method === 'POST') {
-      requireActiveSubscription(user);
+      await requireActiveSubscription(user);
       const input = await readJson(request);
       if (input.confirmed !== true) throw new HttpError(400, 'أكد الإرسال صراحةً قبل إرسال البريد.');
       const to = requireText(input.to, 'عنوان البريد المستلم', 254);
@@ -672,13 +672,13 @@ async function handleRequest(request, response) {
     }
 
     if (url.pathname === '/api/agents' && request.method === 'GET') {
-      sendJson(response, 200, { agents: listAgents(user.id) });
+      sendJson(response, 200, { agents: await listAgents(user.id) });
       return;
     }
     if (url.pathname === '/api/agents' && request.method === 'POST') {
       const input = await readJson(request);
       const id = input.id ? requireUuid(input.id, 'معرّف الوكيل') : randomUUID();
-      const agent = saveAgent(user.id, {
+      const agent = await saveAgent(user.id, {
         id,
         name: requireText(input.name, 'اسم الوكيل', 80),
         instructions: requireText(input.instructions, 'تعليمات الوكيل', 8_000),
@@ -689,15 +689,15 @@ async function handleRequest(request, response) {
     }
     const agentMatch = url.pathname.match(/^\/api\/agents\/([a-f0-9-]{36})$/i);
     if (agentMatch && request.method === 'DELETE') {
-      if (!deleteAgent(user.id, agentMatch[1])) throw new HttpError(404, 'الوكيل غير موجود.');
+      if (!(await deleteAgent(user.id, agentMatch[1]))) throw new HttpError(404, 'الوكيل غير موجود.');
       sendJson(response, 200, { deleted: true });
       return;
     }
     const agentRunMatch = url.pathname.match(/^\/api\/agents\/([a-f0-9-]{36})\/run$/i);
     if (agentRunMatch && request.method === 'POST') {
-      const agent = getAgent(user.id, agentRunMatch[1]);
+      const agent = await getAgent(user.id, agentRunMatch[1]);
       if (!agent) throw new HttpError(404, 'الوكيل غير موجود.');
-      requireActiveSubscription(user);
+      await requireActiveSubscription(user);
       const input = await readJson(request);
       const prompt = requireText(input.prompt, 'طلب الوكيل', 8_000);
       sendJson(response, 200, await runAgent(user, agent, prompt));
