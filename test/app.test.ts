@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import { after, before, test } from 'node:test';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { Document, Packer, Paragraph } from 'docx';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -90,6 +91,43 @@ async function api(
   };
 }
 
+async function uploadFile(cookie: string, filename: string, content: Uint8Array | string, mimeType: string) {
+  const form = new FormData();
+  form.set('file', new Blob([content], { type: mimeType }), filename);
+  const response = await fetch(`${baseUrl}/api/files`, {
+    method: 'POST',
+    headers: { cookie, origin: baseUrl },
+    body: form,
+  });
+  return {
+    response,
+    body: response.headers.get('content-type')?.includes('application/json')
+      ? await response.json()
+      : await response.text(),
+  };
+}
+
+function createTextPdf(text: string) {
+  const objects = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 300] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    `<< /Length ${Buffer.byteLength(`BT /F1 12 Tf 20 250 Td (${text}) Tj ET`) } >>\nstream\nBT /F1 12 Tf 20 250 Td (${text}) Tj ET\nendstream`,
+  ];
+  let pdf = '%PDF-1.4\n';
+  const offsets = [0];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(pdf));
+    pdf += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xrefOffset = Buffer.byteLength(pdf);
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets.slice(1)) pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  return Buffer.from(pdf);
+}
+
 test('registration creates an authenticated account with isolated conversations', async () => {
   const registration = await api('/api/auth/register', {
     method: 'POST',
@@ -168,6 +206,71 @@ test('authentication rejects bad passwords and enforces session access', async (
     body: { displayName: 'Duplicate', email: 'first@example.test', password: 'a-strong-password' },
   });
   assert.equal(duplicate.response.status, 409);
+});
+
+test('uploaded PDF, Word, and text files are private, searchable, and downloadable', async () => {
+  const registration = await api('/api/auth/register', {
+    method: 'POST',
+    body: { displayName: 'باحث ملفات', email: 'files@example.test', password: 'file-search-password' },
+  });
+  const cookie = registration.response.headers.get('set-cookie')?.split(';')[0];
+  assert.ok(cookie);
+
+  const text = await uploadFile(
+    cookie,
+    'policy.txt',
+    'سياسة الإجازات: يحق للموظف الحصول على إجازة سنوية مدفوعة الأجر.',
+    'text/plain',
+  );
+  assert.equal(text.response.status, 201);
+  const wordBuffer = await Packer.toBuffer(new Document({
+    sections: [{ children: [new Paragraph('Employment agreement includes annual leave provisions.')] }],
+  }));
+  const word = await uploadFile(
+    cookie,
+    'agreement.docx',
+    wordBuffer,
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  );
+  assert.equal(word.response.status, 201);
+  const pdf = await uploadFile(cookie, 'policy.pdf', createTextPdf('Annual leave entitlement policy'), 'application/pdf');
+  assert.equal(pdf.response.status, 201);
+
+  const arabicSearch = await api(`/api/files/search?q=${encodeURIComponent('اجازة سنويه')}`, { cookie });
+  assert.equal(arabicSearch.response.status, 200);
+  assert.equal(arabicSearch.body.results.length, 1);
+  assert.equal(arabicSearch.body.results[0].filename, 'policy.txt');
+  assert.match(arabicSearch.body.results[0].excerpt, /إجازة سنوية/);
+
+  const wordSearch = await api(`/api/files/search?q=${encodeURIComponent('agreement provisions')}`, { cookie });
+  assert.equal(wordSearch.body.results[0].filename, 'agreement.docx');
+  const pdfSearch = await api(`/api/files/search?q=${encodeURIComponent('leave entitlement')}`, { cookie });
+  assert.equal(pdfSearch.body.results[0].filename, 'policy.pdf');
+
+  const download = await fetch(`${baseUrl}/api/files/${text.body.file.id}/download`, { headers: { cookie } });
+  assert.equal(download.status, 200);
+  assert.match(download.headers.get('content-disposition') ?? '', /policy\.txt/);
+  assert.match(await download.text(), /إجازة سنوية/);
+
+  const otherUser = await api('/api/auth/register', {
+    method: 'POST',
+    body: { displayName: 'حساب آخر', email: 'other-files@example.test', password: 'other-files-password' },
+  });
+  const otherCookie = otherUser.response.headers.get('set-cookie')?.split(';')[0];
+  assert.ok(otherCookie);
+  const privateFiles = await api('/api/files', { cookie: otherCookie });
+  assert.deepEqual(privateFiles.body.files, []);
+  const privateSearch = await api(`/api/files/search?q=${encodeURIComponent('اجازة سنويه')}`, { cookie: otherCookie });
+  assert.deepEqual(privateSearch.body.results, []);
+  const privateDownload = await fetch(`${baseUrl}/api/files/${text.body.file.id}/download`, { headers: { cookie: otherCookie } });
+  assert.equal(privateDownload.status, 404);
+
+  const unsupported = await uploadFile(cookie, 'payload.exe', 'not a document', 'text/plain');
+  assert.equal(unsupported.response.status, 400);
+  const deleted = await api(`/api/files/${text.body.file.id}`, { method: 'DELETE', cookie });
+  assert.equal(deleted.response.status, 200);
+  const noLongerSearchable = await api(`/api/files/search?q=${encodeURIComponent('اجازة سنويه')}`, { cookie });
+  assert.deepEqual(noLongerSearchable.body.results, []);
 });
 
 test('Vodafone Cash payments require admin approval before AI access', async () => {

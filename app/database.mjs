@@ -4,6 +4,12 @@ import { mkdirSync } from 'node:fs';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import path from 'node:path';
 import pg from 'pg';
+import {
+  MAX_USER_FILE_BYTES,
+  MAX_USER_FILES,
+  normalizeSearchText,
+  splitTextIntoChunks,
+} from './file-search.mjs';
 
 const { Pool } = pg;
 const transactionContext = new AsyncLocalStorage();
@@ -147,6 +153,26 @@ const sqliteSchema = `
     updated_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS documents_user_idx ON documents(user_id, updated_at DESC);
+  CREATE TABLE IF NOT EXISTS uploaded_files (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    filename TEXT NOT NULL,
+    normalized_filename TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    file_data BLOB NOT NULL,
+    extracted_text TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS uploaded_files_user_idx ON uploaded_files(user_id, created_at DESC);
+  CREATE TABLE IF NOT EXISTS uploaded_file_chunks (
+    id TEXT PRIMARY KEY,
+    file_id TEXT NOT NULL REFERENCES uploaded_files(id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    normalized_content TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS uploaded_file_chunks_file_idx ON uploaded_file_chunks(file_id, ordinal);
   CREATE TABLE IF NOT EXISTS payment_requests (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -225,6 +251,26 @@ const postgresSchema = `
     updated_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS documents_user_idx ON documents(user_id, updated_at DESC);
+  CREATE TABLE IF NOT EXISTS uploaded_files (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    filename TEXT NOT NULL,
+    normalized_filename TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL,
+    file_data BYTEA NOT NULL,
+    extracted_text TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS uploaded_files_user_idx ON uploaded_files(user_id, created_at DESC);
+  CREATE TABLE IF NOT EXISTS uploaded_file_chunks (
+    id TEXT PRIMARY KEY,
+    file_id TEXT NOT NULL REFERENCES uploaded_files(id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL,
+    content TEXT NOT NULL,
+    normalized_content TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS uploaded_file_chunks_file_idx ON uploaded_file_chunks(file_id, ordinal);
   CREATE TABLE IF NOT EXISTS payment_requests (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -425,6 +471,84 @@ export async function saveDocument(userId, { id, title, content }) {
 
 export async function deleteDocument(userId, documentId) {
   return (await run('DELETE FROM documents WHERE id = ? AND user_id = ?', [documentId, userId])).changes > 0;
+}
+
+export async function createUploadedFile({ id, userId, filename, mimeType, sizeBytes, fileData, extractedText }) {
+  const createdAt = now();
+  await transaction(async () => {
+    if (postgres) await run('SELECT pg_advisory_xact_lock(hashtext(?))', [userId]);
+    const quota = await get(
+      'SELECT COUNT(*) AS fileCount, COALESCE(SUM(size_bytes), 0) AS totalBytes FROM uploaded_files WHERE user_id = ?',
+      [userId],
+    );
+    if (Number(quota.fileCount) >= MAX_USER_FILES) {
+      const error = new Error('وصلت إلى الحد الأقصى وهو 30 ملفًا لكل حساب.');
+      error.code = 'FILE_COUNT_LIMIT';
+      throw error;
+    }
+    if (Number(quota.totalBytes) + sizeBytes > MAX_USER_FILE_BYTES) {
+      const error = new Error('مساحة الملفات المتاحة لكل حساب هي 100 ميجابايت.');
+      error.code = 'FILE_STORAGE_LIMIT';
+      throw error;
+    }
+
+    await run(
+      'INSERT INTO uploaded_files (id, user_id, filename, normalized_filename, mime_type, size_bytes, file_data, extracted_text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [id, userId, filename, normalizeSearchText(filename), mimeType, sizeBytes, fileData, extractedText, createdAt],
+    );
+    const chunks = splitTextIntoChunks(extractedText);
+    for (const [ordinal, content] of chunks.entries()) {
+      await run(
+        'INSERT INTO uploaded_file_chunks (id, file_id, ordinal, content, normalized_content) VALUES (?, ?, ?, ?, ?)',
+        [randomUUID(), id, ordinal, content, normalizeSearchText(content)],
+      );
+    }
+  });
+  return {
+    id, filename, mimeType, sizeBytes, createdAt,
+    searchableChunks: splitTextIntoChunks(extractedText).length,
+  };
+}
+
+export async function listUploadedFiles(userId) {
+  return all(
+    'SELECT id, filename, mime_type AS mimeType, size_bytes AS sizeBytes, created_at AS createdAt FROM uploaded_files WHERE user_id = ? ORDER BY created_at DESC LIMIT 100',
+    [userId],
+  );
+}
+
+export async function getUploadedFile(userId, fileId) {
+  return get(
+    'SELECT id, filename, mime_type AS mimeType, size_bytes AS sizeBytes, file_data AS fileData, created_at AS createdAt FROM uploaded_files WHERE id = ? AND user_id = ?',
+    [fileId, userId],
+  );
+}
+
+export async function deleteUploadedFile(userId, fileId) {
+  return (await run('DELETE FROM uploaded_files WHERE id = ? AND user_id = ?', [fileId, userId])).changes > 0;
+}
+
+export async function searchUploadedFiles(userId, query, terms) {
+  const phrase = normalizeSearchText(query);
+  const termPatterns = terms.map((term) => `%${term}%`);
+  const scoreParts = [
+    'CASE WHEN chunks.normalized_content LIKE ? THEN 12 ELSE 0 END',
+    'CASE WHEN files.normalized_filename LIKE ? THEN 10 ELSE 0 END',
+    ...terms.map(() => 'CASE WHEN chunks.normalized_content LIKE ? THEN 3 ELSE 0 END'),
+    ...terms.map(() => 'CASE WHEN files.normalized_filename LIKE ? THEN 5 ELSE 0 END'),
+  ];
+  const scoreParams = [`%${phrase}%`, `%${phrase}%`, ...termPatterns, ...termPatterns];
+  const matchParts = [
+    'chunks.normalized_content LIKE ?',
+    'files.normalized_filename LIKE ?',
+    ...terms.map(() => 'chunks.normalized_content LIKE ?'),
+    ...terms.map(() => 'files.normalized_filename LIKE ?'),
+  ];
+  const matchParams = [`%${phrase}%`, `%${phrase}%`, ...termPatterns, ...termPatterns];
+  return all(
+    `SELECT files.id AS fileId, files.filename, files.mime_type AS mimeType, files.created_at AS createdAt, chunks.content, (${scoreParts.join(' + ')}) AS score FROM uploaded_files AS files JOIN uploaded_file_chunks AS chunks ON chunks.file_id = files.id WHERE files.user_id = ? AND (${matchParts.join(' OR ')}) ORDER BY score DESC, files.created_at DESC, files.id, chunks.ordinal LIMIT 250`,
+    [...scoreParams, userId, ...matchParams],
+  );
 }
 
 export async function getActiveSubscription(userId) {

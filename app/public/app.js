@@ -6,7 +6,7 @@ const chatInput = document.querySelector('#chat-input');
 const chatForm = document.querySelector('#chat-form');
 const sendButton = document.querySelector('#send-button');
 const toast = document.querySelector('#toast');
-const views = Object.fromEntries(['chat', 'documents', 'agents', 'integrations', 'billing'].map((name) => [
+const views = Object.fromEntries(['chat', 'documents', 'files', 'agents', 'integrations', 'billing'].map((name) => [
   name, document.querySelector(`#${name}-view`),
 ]));
 
@@ -29,9 +29,10 @@ function showToast(message) {
 }
 
 async function apiJson(url, options = {}) {
+  const isFormData = options.body instanceof FormData;
   const response = await fetch(url, {
     ...options,
-    headers: { ...(options.body ? { 'content-type': 'application/json' } : {}), ...options.headers },
+    headers: { ...(options.body && !isFormData ? { 'content-type': 'application/json' } : {}), ...options.headers },
   });
   if (!response.ok) {
     const result = await response.json().catch(() => ({}));
@@ -62,6 +63,7 @@ function selectView(name) {
   const titles = {
     chat: ['مساحة عملك', 'المساعد الذكي'],
     documents: ['مساعدك في كتابة المستندات', 'المستندات'],
+    files: ['ارفع ملفاتك وابحث فيها', 'ملفاتي والبحث'],
     agents: ['وكلاء بمهمات محددة', 'الوكلاء'],
     integrations: ['اتصل بأدوات عملك', 'التكاملات'],
     billing: ['الخطة والدفع', 'اشتراكي'],
@@ -71,6 +73,7 @@ function selectView(name) {
   if (name === 'agents') void loadAgents();
   if (name === 'integrations') void loadIntegrationStatus();
   if (name === 'documents') void loadDocuments();
+  if (name === 'files') void loadFiles();
   if (name === 'billing') void loadBilling();
 }
 
@@ -413,6 +416,129 @@ async function loadDocuments() {
       button.addEventListener('click', () => void openDocument(documentInfo.id));
       container.append(button);
     }
+
+    function formatFileSize(bytes) {
+      if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} كيلوبايت`;
+      return `${(bytes / (1024 * 1024)).toFixed(1)} ميجابايت`;
+    }
+
+    async function loadFiles() {
+      try {
+        const { files } = await apiJson('/api/files');
+        const container = document.querySelector('#uploaded-file-list');
+        container.replaceChildren();
+        if (!files.length) {
+          const empty = document.createElement('p');
+          empty.className = 'file-empty-state';
+          empty.textContent = 'لم ترفع ملفات بعد.';
+          container.append(empty);
+          return;
+        }
+        for (const file of files) {
+          const item = document.createElement('article');
+          item.className = 'uploaded-file-item';
+          const details = document.createElement('div');
+          details.className = 'uploaded-file-details';
+          const name = document.createElement('strong');
+          name.textContent = file.filename;
+          const meta = document.createElement('small');
+          meta.textContent = `${formatFileSize(file.sizeBytes)} · ${formatDate(file.createdAt)}`;
+          details.append(name, meta);
+          const actions = document.createElement('div');
+          actions.className = 'uploaded-file-actions';
+          const download = document.createElement('a');
+          download.className = 'secondary-button';
+          download.href = `/api/files/${encodeURIComponent(file.id)}/download`;
+          download.textContent = 'تنزيل';
+          download.setAttribute('aria-label', `تنزيل ${file.filename}`);
+          const remove = document.createElement('button');
+          remove.className = 'secondary-button';
+          remove.type = 'button';
+          remove.textContent = 'حذف';
+          remove.setAttribute('aria-label', `حذف ${file.filename}`);
+          remove.addEventListener('click', () => void deleteUploadedFile(file.id));
+          actions.append(download, remove);
+          item.append(details, actions);
+          container.append(item);
+        }
+      } catch (error) {
+        showToast(error.message);
+      }
+    }
+
+    async function deleteUploadedFile(id) {
+      try {
+        await apiJson(`/api/files/${encodeURIComponent(id)}`, { method: 'DELETE' });
+        showToast('تم حذف الملف وفهرسه.');
+        await loadFiles();
+      } catch (error) {
+        showToast(error.message);
+      }
+    }
+
+    document.querySelector('#file-upload-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const input = document.querySelector('#file-upload');
+      const file = input.files[0];
+      if (!file) return;
+      const button = document.querySelector('#file-upload-submit');
+      button.disabled = true;
+      try {
+        const body = new FormData();
+        body.set('file', file);
+        const result = await apiJson('/api/files', { method: 'POST', body });
+        input.value = '';
+        showToast(`تم رفع وفهرسة «${result.file.filename}».`);
+        await loadFiles();
+      } catch (error) {
+        showToast(error.message);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    document.querySelector('#file-search-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const button = document.querySelector('#file-search-submit');
+      const container = document.querySelector('#file-search-results');
+      button.disabled = true;
+      try {
+        const query = document.querySelector('#file-search-query').value.trim();
+        const { results } = await apiJson(`/api/files/search?q=${encodeURIComponent(query)}`);
+        container.replaceChildren();
+        if (!results.length) {
+          const empty = document.createElement('p');
+          empty.className = 'file-empty-state';
+          empty.textContent = 'لم نجد مقاطع مطابقة. جرّب كلمات مختلفة أو ارفع ملفات إضافية.';
+          container.append(empty);
+          return;
+        }
+        const count = document.createElement('p');
+        count.className = 'file-search-count';
+        count.textContent = `عُثر على ${results.length} ${results.length === 1 ? 'ملف' : 'ملفات'} ذات صلة.`;
+        container.append(count);
+        for (const result of results) {
+          const card = document.createElement('article');
+          card.className = 'file-search-result';
+          const header = document.createElement('div');
+          header.className = 'file-result-header';
+          const name = document.createElement('strong');
+          name.textContent = result.filename;
+          const download = document.createElement('a');
+          download.href = `/api/files/${encodeURIComponent(result.id)}/download`;
+          download.textContent = 'تنزيل الملف';
+          header.append(name, download);
+          const excerpt = document.createElement('p');
+          excerpt.textContent = result.excerpt;
+          card.append(header, excerpt);
+          container.append(card);
+        }
+      } catch (error) {
+        showToast(error.message);
+      } finally {
+        button.disabled = false;
+      }
+    });
   } catch (error) {
     showToast(error.message);
   }
