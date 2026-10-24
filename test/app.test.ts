@@ -64,7 +64,7 @@ before(async () => {
 after(async () => {
   await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   await new Promise<void>((resolve, reject) => providerServer.close((error) => error ? reject(error) : resolve()));
-  database.db.close();
+  await database.closeDatabase();
   await rm(tempDir, { recursive: true, force: true });
 });
 
@@ -294,7 +294,7 @@ test('multimodal chat, speech, and generated document use the configured provide
 });
 
 test('integration routes report configuration errors instead of faking success', async () => {
-  const account = database.db.prepare('SELECT id FROM users WHERE email = ?').get('first@example.test') as { id: string } | undefined;
+  const account = await database.getUserByEmail('first@example.test');
   assert.ok(account);
   const token = await api('/api/auth/login', {
     method: 'POST',
