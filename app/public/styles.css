@@ -125,6 +125,24 @@ button { cursor: pointer; }
 .saved-document { overflow: hidden; padding: 8px 9px; border: 0; border-radius: 7px; color: #6e6d83; background: #f8f7fc; text-align: right; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 .saved-document:hover { color: #4f42ae; background: #f0edff; }
 .document-preview-panel { display: flex; min-height: 500px; flex-direction: column; padding: 20px; }
+.files-view { padding: clamp(21px, 4vw, 48px); }
+.files-layout { display: grid; width: min(100%, 1120px); flex: 1; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 19px; align-self: center; }
+.files-layout .feature-panel { width: 100%; }
+.files-layout input[type="file"] { min-height: 40px; padding: 8px; }
+.file-storage-note { margin: 12px 0; color: #9291a3; font-size: 10px; line-height: 1.8; }
+.uploaded-file-list, .file-search-results { display: grid; gap: 9px; margin-top: 15px; }
+.uploaded-file-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; border: 1px solid #efeff4; border-radius: 10px; }
+.uploaded-file-details { display: grid; min-width: 0; gap: 5px; }
+.uploaded-file-details strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.uploaded-file-details small { color: #9291a3; font-size: 9px; }
+.uploaded-file-actions { display: flex; flex: 0 0 auto; gap: 5px; }
+.uploaded-file-actions .secondary-button { min-height: 30px; padding: 5px 8px; font-size: 9px; text-decoration: none; }
+.file-empty-state, .file-search-count { margin: 0; color: #9291a3; font-size: 10px; line-height: 1.8; }
+.file-search-result { padding: 12px; border: 1px solid #efeff4; border-radius: 10px; background: #fdfdff; }
+.file-result-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.file-result-header strong { min-width: 0; overflow-wrap: anywhere; font-size: 10px; }
+.file-result-header a { flex: 0 0 auto; color: #5849c0; font-size: 9px; font-weight: 600; }
+.file-search-result p { margin: 8px 0 0; color: #77768a; font-size: 10px; line-height: 1.9; white-space: pre-wrap; overflow-wrap: anywhere; }
 .preview-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 2px 17px; border-bottom: 1px solid #f0eff4; }
 .preview-header h2 { margin-top: 4px; }
 .export-actions { display: flex; gap: 7px; }
@@ -222,7 +240,7 @@ button { cursor: pointer; }
   .sidebar { width: 220px; }
   .workspace { width: calc(100% - 220px); margin-right: 220px; }
   .documents-layout { grid-template-columns: minmax(230px, .78fr) minmax(0, 1.22fr); gap: 14px; }
-  .feature-layout, .integrations-layout, .billing-layout { gap: 12px; }
+  .feature-layout, .integrations-layout, .billing-layout, .files-layout { gap: 12px; }
   .feature-panel { padding: 15px; }
   .suggestions { gap: 7px; }
   .suggestion-card { gap: 6px; padding: 9px 7px; }
@@ -253,8 +271,9 @@ button { cursor: pointer; }
   .composer-hint { font-size: 8px; }
   .disclaimer { margin-bottom: 10px; }
   .documents-view { padding: 15px 12px 76px; }
+  .files-view { padding: 15px 12px 76px; }
   .documents-layout { grid-template-columns: 1fr; }
-  .feature-layout, .integrations-layout, .billing-layout { grid-template-columns: 1fr; }
+  .feature-layout, .integrations-layout, .billing-layout, .files-layout { grid-template-columns: 1fr; }
   .subscription-panel, .admin-billing-panel, .billing-note { grid-column: auto; }
   .integration-status-card { grid-column: auto; }
   .document-form-panel { padding: 16px; }

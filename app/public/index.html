@@ -36,6 +36,7 @@
         <nav class="primary-nav">
           <button class="nav-link active" data-view="chat" type="button"><span aria-hidden="true">✳</span> المساعد الذكي</button>
           <button class="nav-link" data-view="documents" type="button"><span aria-hidden="true">▤</span> المستندات</button>
+          <button class="nav-link" data-view="files" type="button"><span aria-hidden="true">▧</span> ملفاتي والبحث</button>
           <button class="nav-link" data-view="agents" type="button"><span aria-hidden="true">⌘</span> الوكلاء</button>
           <button class="nav-link" data-view="integrations" type="button"><span aria-hidden="true">⤳</span> التكاملات</button>
           <button class="nav-link" data-view="billing" type="button"><span aria-hidden="true">◇</span> اشتراكي</button>
@@ -139,6 +140,30 @@
                 <textarea class="document-content hidden" id="document-content" aria-label="محتوى المستند، قابل للتعديل"></textarea>
               </div>
             </div>
+          </div>
+        </section>
+
+        <section class="view-panel files-view hidden" id="files-view">
+          <div class="files-layout">
+            <section class="feature-panel">
+              <div class="section-heading"><span class="section-icon">▧</span><div><h2>ملفاتك</h2><p>ارفع PDF أو Word أو TXT أو Markdown أو CSV للبحث داخل محتواها.</p></div></div>
+              <form id="file-upload-form">
+                <label for="file-upload">اختر ملفًا (حتى 10 ميجابايت)</label>
+                <input id="file-upload" type="file" accept=".pdf,.docx,.txt,.md,.csv,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain,text/markdown,text/csv" required>
+                <button class="primary-button" type="submit" id="file-upload-submit">رفع وفهرسة الملف</button>
+              </form>
+              <p class="file-storage-note">نستخرج النص للبحث ونحفظ الملف ضمن حسابك الخاص. الحد الإجمالي 30 ملفًا و100 ميجابايت للحساب. ملفات PDF المصوّرة التي لا تحتوي نصًا تحتاج OCR.</p>
+              <div class="uploaded-file-list" id="uploaded-file-list" aria-live="polite"></div>
+            </section>
+            <section class="feature-panel file-search-panel">
+              <div class="section-heading"><span class="section-icon">⌕</span><div><h2>ابحث داخل ملفاتك</h2><p>بحث عربي يراعي اختلافات الهمزات والتشكيل، ويرتب المقاطع الأقرب لعبارتك.</p></div></div>
+              <form id="file-search-form">
+                <label for="file-search-query">عبارة البحث</label>
+                <input id="file-search-query" maxlength="200" required placeholder="مثال: شروط الإجازة السنوية">
+                <button class="primary-button" type="submit" id="file-search-submit">بحث في الملفات</button>
+              </form>
+              <div class="file-search-results" id="file-search-results" aria-live="polite"></div>
+            </section>
           </div>
         </section>
 

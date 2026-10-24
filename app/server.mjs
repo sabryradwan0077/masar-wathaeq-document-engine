@@ -2,8 +2,10 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
+import { Readable } from 'node:stream';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import Busboy from 'busboy';
 import {
   createSessionToken,
   expiredSessionCookie,
@@ -33,16 +35,24 @@ import {
   listPaymentRequests,
   listPendingPaymentRequests,
   createPaymentRequest,
+  createUploadedFile,
+  deleteUploadedFile,
+  getUploadedFile,
+  listUploadedFiles,
+  searchUploadedFiles,
   saveAgent,
   saveConversation,
   saveDocument,
   reviewPaymentRequest,
   isUniqueConstraintError,
 } from './database.mjs';
+import { FileInputError, extractUploadedText } from './file-extract.mjs';
+import { createSearchExcerpt, MAX_UPLOAD_BYTES, splitSearchTerms } from './file-search.mjs';
 import { IntegrationError, integrationStatus, sendEmail, webSearch } from './integrations.mjs';
 
 const publicRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'public');
 const maxJsonBytes = 20_000_000;
+const maxMultipartBytes = MAX_UPLOAD_BYTES + 256_000;
 const authAttempts = new Map();
 
 class HttpError extends Error {
@@ -83,6 +93,53 @@ function requireText(value, label, maxLength) {
     throw new HttpError(400, `يرجى إدخال ${label} بشكل صحيح.`);
   }
   return value.trim();
+}
+
+async function readUploadedFile(request) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of request) {
+    size += chunk.length;
+    if (size > maxMultipartBytes) throw new HttpError(413, 'الحد الأقصى لحجم الملف الواحد هو 10 ميجابايت.');
+    chunks.push(chunk);
+  }
+  let upload = null;
+  let oversized = false;
+  let invalidField = false;
+  try {
+    const parser = Busboy({
+      headers: request.headers,
+      limits: { files: 1, fields: 0, parts: 1, fileSize: MAX_UPLOAD_BYTES },
+    });
+    await new Promise((resolve, reject) => {
+      parser.on('file', (fieldName, stream, info) => {
+        if (fieldName !== 'file') invalidField = true;
+        const fileChunks = [];
+        stream.on('limit', () => { oversized = true; });
+        stream.on('data', (chunk) => fileChunks.push(chunk));
+        stream.on('error', reject);
+        stream.on('end', () => {
+          upload = {
+            filename: info.filename,
+            mimeType: info.mimeType,
+            data: Buffer.concat(fileChunks),
+          };
+        });
+      });
+      parser.once('filesLimit', () => reject(new HttpError(400, 'ارفع ملفًا واحدًا في كل مرة.')));
+      parser.once('fieldsLimit', () => reject(new HttpError(400, 'الطلب يحتوي على حقول غير مدعومة.')));
+      parser.once('error', reject);
+      parser.once('close', resolve);
+      Readable.from([Buffer.concat(chunks)]).pipe(parser);
+    });
+  } catch (error) {
+    if (error instanceof HttpError) throw error;
+    throw new HttpError(400, 'تعذر قراءة الملف المرفوع.');
+  }
+  if (oversized) throw new HttpError(413, 'الحد الأقصى لحجم الملف الواحد هو 10 ميجابايت.');
+  if (invalidField) throw new HttpError(400, 'ارفع الملف في الحقل المخصص له.');
+  if (!upload) throw new HttpError(400, 'اختر ملفًا لرفعه.');
+  return upload;
 }
 
 function requireUuid(value, label) {
@@ -538,6 +595,78 @@ async function handleRequest(request, response) {
 
   if (url.pathname.startsWith('/api/')) {
     const user = await requireUser(request);
+
+    if (url.pathname === '/api/files' && request.method === 'GET') {
+      sendJson(response, 200, { files: await listUploadedFiles(user.id) });
+      return;
+    }
+    if (url.pathname === '/api/files' && request.method === 'POST') {
+      const input = await readUploadedFile(request);
+      let extracted;
+      try {
+        extracted = await extractUploadedText(input);
+      } catch (error) {
+        if (error instanceof FileInputError) throw new HttpError(400, error.message);
+        throw error;
+      }
+      try {
+        const file = await createUploadedFile({
+          id: randomUUID(),
+          userId: user.id,
+          ...extracted,
+        });
+        sendJson(response, 201, { file });
+      } catch (error) {
+        if (error?.code === 'FILE_COUNT_LIMIT' || error?.code === 'FILE_STORAGE_LIMIT') {
+          throw new HttpError(413, error.message);
+        }
+        throw error;
+      }
+      return;
+    }
+    if (url.pathname === '/api/files/search' && request.method === 'GET') {
+      const query = requireText(url.searchParams.get('q'), 'عبارة البحث', 200);
+      const terms = splitSearchTerms(query);
+      if (terms.length === 0) throw new HttpError(400, 'اكتب كلمتين على الأقل للبحث داخل الملفات.');
+      const matches = await searchUploadedFiles(user.id, query, terms);
+      const files = new Map();
+      for (const match of matches) {
+        if (!files.has(match.fileId)) {
+          files.set(match.fileId, {
+            id: match.fileId,
+            filename: match.filename,
+            mimeType: match.mimeType,
+            createdAt: match.createdAt,
+            score: Number(match.score),
+            excerpt: createSearchExcerpt(match.content, terms),
+          });
+        }
+      }
+      sendJson(response, 200, { query, results: [...files.values()] });
+      return;
+    }
+    const fileDownloadMatch = url.pathname.match(/^\/api\/files\/([a-f0-9-]{36})\/download$/i);
+    if (fileDownloadMatch && request.method === 'GET') {
+      const file = await getUploadedFile(user.id, fileDownloadMatch[1]);
+      if (!file) throw new HttpError(404, 'الملف غير موجود.');
+      const fallbackName = file.filename.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'download';
+      const encodedName = encodeURIComponent(file.filename).replace(/['()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+      response.writeHead(200, {
+        'content-type': file.mimeType,
+        'content-length': file.sizeBytes,
+        'content-disposition': `attachment; filename="${fallbackName}"; filename*=UTF-8''${encodedName}`,
+        'cache-control': 'private, no-store',
+        'x-content-type-options': 'nosniff',
+      });
+      response.end(file.fileData);
+      return;
+    }
+    const fileMatch = url.pathname.match(/^\/api\/files\/([a-f0-9-]{36})$/i);
+    if (fileMatch && request.method === 'DELETE') {
+      if (!(await deleteUploadedFile(user.id, fileMatch[1]))) throw new HttpError(404, 'الملف غير موجود.');
+      sendJson(response, 200, { deleted: true });
+      return;
+    }
 
     if (url.pathname === '/api/conversations' && request.method === 'GET') {
       sendJson(response, 200, { conversations: await listConversations(user.id) });
